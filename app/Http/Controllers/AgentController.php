@@ -412,6 +412,302 @@ class AgentController extends Controller
         }
     }
 
+    public function creditAssistance(Request $request){
+        try {
+            $customer = Customer::where('id', $request->customer)->first();
+            $ticketWifi = false;
+            $amount = 0;
+            $frais = 0;
+            $operation = 'data_credit';
+            $receveur = $request->receveur;
+            $operateur = $request->operateur;
+            $account = AssistanceDataCredit::where('customer_id', $customer->id)->first();
+            $forfait = null;
+            if ($account) {
+               if($account->solde >= $account->defaut_credit && $operateur == $account->operateur){
+                   // creation de l'operation achat du pack
+                   $forfait = ForfaitDataCredit::where('price', strval($account->defaut_credit))->where('operateur', $operateur == 'AIRTEL_GA' ? 'airtel' : 'moov')->first();
+               }else{
+                   $forfaitEquivalent = ForfaitDataCredit::where('price','<=', strval($account->solde))->where('price','<=', strval($account->defaut_credit))->where('operateur', $request->operateur == 'AIRTEL_GA' ? 'airtel' : 'moov')->first();
+                   if($forfaitEquivalent){
+                       $forfait = $forfaitEquivalent;
+                   }else{
+                      if($account->solde >= 120){
+                          $operation = 'achat_credit';
+                          // creation de l'achat crédit
+                          if($account->solde >= 200){
+                              $frais = 100;
+                          }else{
+                              $frais = 20;
+                          }
+                          $amount = $account->solde - $frais;
+
+                      }else{
+                          return response()->json([
+                              'statut' => true,
+                              'action' => 'charge'
+                          ]);
+                      }
+                   }
+               }
+
+                $trans = new Historiquetrans([
+                    'operation' => $operation,
+                    'reference' =>  'MP_assistance',
+                    'numclient' => $receveur,
+                    'phonevendeur' => $account->customer_phone,
+                    'content' => $operateur ,
+                    'montant' => strval(intval($amount) + intval($frais)),
+                    'montant_sans_frais' => strval($amount),
+                    'frais' => strval($frais),
+                    'solde' => $account->solde,
+                    'origine_operation' => 'assistant',
+                    'id_customer' => $account->customer_id
+                ]);
+                $trans->save();
+                if ($trans->id) {
+                    $newSolde = $trans->montant;
+                    if (!empty($account->solde)) {
+                        $newSolde = $account->solde - intval($trans->montant);
+                    }
+                    $account->update([
+                        'solde' => $newSolde,
+                        'operateur' => $operateur,
+                    ]);
+
+                    if($forfait != null){
+                        $details_operation = [];
+                        if ($forfait->qte_flex != null) {
+                            array_push($details_operation, array(
+                                'operation' => 'flex',
+                                'qte' => $forfait->qte_flex,
+                                'name' => 'flex',
+                                'status' => 'wait',
+                                'validity' => $forfait->validity_flex,
+                                'transaction_id' => $trans->id,
+                                'numclient' => $receveur,
+                                'operateur' => $operateur,
+                                'reference' => 'MP_assistance',
+                            ));
+                        }
+
+                        if ($forfait->qte_min != null) {
+                            array_push($details_operation, array(
+                                'operation' => $operateur == 'AIRTEL_GA' ? 'achat_credit' : 'Appels',
+                                'qte' => $operateur == 'AIRTEL_GA' ? $forfait->param2 : $forfait->qte_min,
+                                'name' => 'Appels',
+                                'status' => 'wait',
+                                'validity' => $forfait->validity_min,
+                                'transaction_id' => $trans->id,
+                                'numclient' => $receveur,
+                                'operateur' => $operateur,
+                                'reference' => 'MP_assistance',
+                            ));
+                        }
+
+                        if ($forfait->qte_mega != null) {
+                            array_push($details_operation, array(
+                                'operation' => 'achat_forfait',
+                                'qte' => $forfait->qte_mega,
+                                'name' => 'achat_forfait',
+                                'status' => 'wait',
+                                'validity' => $forfait->validity_mega,
+                                'transaction_id' => $trans->id,
+                                'numclient' => $receveur,
+                                'operateur' => $operateur,
+                                'reference' => 'MP_assistance',
+                            ));
+                        }
+
+                        if ($forfait->ticket_wifi != null) {
+                            $ticketWifi = true;
+                        }
+
+                        for ($i = 0; $i < count($details_operation); $i++) {
+                            $details = new DetatilsOperation($details_operation[$i]);
+                            $details->save();
+                        }
+                        $account->update([
+                            'etat' => 'atraiter'
+                        ]);
+                    }
+
+                    $this->assistancePartyFirebase($customer,$trans, $operation, $ticketWifi);
+
+                    return response()->json([
+                        'statut' => true,
+                        'trans' => $trans,
+                        'action' => 'next'
+                    ]);
+
+                }else{
+                    return response()->json([
+                        'statut' => false,
+                        'action' => 'no trans'
+                    ]);
+                }
+            } else {
+                return response()->json([
+                    'statut' => false,
+                    'action' => 'no wallet'
+                ]);
+            }
+        } catch (\Exception $th) {
+            return response()->json([
+                'statut' => false,
+                'action' => 'error'
+            ]);
+        }
+    }
+
+    public function dataAssistance(Request $request){
+        try {
+            $customer = Customer::where('id', $request->customer)->first();
+            $ticketWifi = false;
+            $amount = 0;
+            $frais = 0;
+            $operation = 'data_credit';
+            $receveur = $request->receveur;
+            $operateur = $request->operateur;
+            $account = AssistanceDataCredit::where('customer_id', $customer->id)->first();
+            $forfait = null;
+            if ($account) {
+                if($account->solde >= $account->defaut_credit && $operateur == $account->operateur){
+                    // creation de l'operation achat du pack
+                    $forfait = ForfaitDataCredit::where('price', strval($account->defaut_credit))->where('operateur', $operateur == 'AIRTEL_GA' ? 'airtel' : 'moov')->first();
+                }else{
+                    $forfaitEquivalent = ForfaitDataCredit::where('price','<=', strval($account->solde))->where('price','<=', strval($account->defaut_credit))->where('operateur', $request->operateur == 'AIRTEL_GA' ? 'airtel' : 'moov')->first();
+                    if($forfaitEquivalent){
+                        $forfait = $forfaitEquivalent;
+                    }else{
+                        if($account->solde >= 120){
+                            $operation = 'achat_credit';
+                            // creation de l'achat crédit
+                            if($account->solde >= 200){
+                                $frais = 100;
+                            }else{
+                                $frais = 20;
+                            }
+                            $amount = $account->solde - $frais;
+
+                        }else{
+                            return response()->json([
+                                'statut' => true,
+                                'action' => 'charge'
+                            ]);
+                        }
+                    }
+                }
+
+                $trans = new Historiquetrans([
+                    'operation' => $operation,
+                    'reference' =>  'MP_assistance',
+                    'numclient' => $receveur,
+                    'phonevendeur' => $account->customer_phone,
+                    'content' => $operateur ,
+                    'montant' => strval(intval($amount) + intval($frais)),
+                    'montant_sans_frais' => strval($amount),
+                    'frais' => strval($frais),
+                    'solde' => $account->solde,
+                    'origine_operation' => 'assistant',
+                    'id_customer' => $account->customer_id
+                ]);
+                $trans->save();
+                if ($trans->id) {
+                    $newSolde = $trans->montant;
+                    if (!empty($account->solde)) {
+                        $newSolde = $account->solde - intval($trans->montant);
+                    }
+                    $account->update([
+                        'solde' => $newSolde,
+                        'operateur' => $operateur,
+                    ]);
+
+                    if($forfait != null){
+                        $details_operation = [];
+                        if ($forfait->qte_flex != null) {
+                            array_push($details_operation, array(
+                                'operation' => 'flex',
+                                'qte' => $forfait->qte_flex,
+                                'name' => 'flex',
+                                'status' => 'wait',
+                                'validity' => $forfait->validity_flex,
+                                'transaction_id' => $trans->id,
+                                'numclient' => $receveur,
+                                'operateur' => $operateur,
+                                'reference' => 'MP_assistance',
+                            ));
+                        }
+
+                        if ($forfait->qte_min != null) {
+                            array_push($details_operation, array(
+                                'operation' => $operateur == 'AIRTEL_GA' ? 'achat_credit' : 'Appels',
+                                'qte' => $operateur == 'AIRTEL_GA' ? $forfait->param2 : $forfait->qte_min,
+                                'name' => 'Appels',
+                                'status' => 'wait',
+                                'validity' => $forfait->validity_min,
+                                'transaction_id' => $trans->id,
+                                'numclient' => $receveur,
+                                'operateur' => $operateur,
+                                'reference' => 'MP_assistance',
+                            ));
+                        }
+
+                        if ($forfait->qte_mega != null) {
+                            array_push($details_operation, array(
+                                'operation' => 'achat_forfait',
+                                'qte' => $forfait->qte_mega,
+                                'name' => 'achat_forfait',
+                                'status' => 'wait',
+                                'validity' => $forfait->validity_mega,
+                                'transaction_id' => $trans->id,
+                                'numclient' => $receveur,
+                                'operateur' => $operateur,
+                                'reference' => 'MP_assistance',
+                            ));
+                        }
+
+                        if ($forfait->ticket_wifi != null) {
+                            $ticketWifi = true;
+                        }
+
+                        for ($i = 0; $i < count($details_operation); $i++) {
+                            $details = new DetatilsOperation($details_operation[$i]);
+                            $details->save();
+                        }
+                        $account->update([
+                            'etat' => 'atraiter'
+                        ]);
+                    }
+
+                    $this->assistancePartyFirebase($customer,$trans, $operation, $ticketWifi);
+
+                    return response()->json([
+                        'statut' => true,
+                        'trans' => $trans,
+                        'action' => 'next'
+                    ]);
+
+                }else{
+                    return response()->json([
+                        'statut' => false,
+                        'action' => 'no trans'
+                    ]);
+                }
+            } else {
+                return response()->json([
+                    'statut' => false,
+                    'action' => 'no wallet'
+                ]);
+            }
+        } catch (\Exception $th) {
+            return response()->json([
+                'statut' => false,
+                'action' => 'error'
+            ]);
+        }
+    }
+
     public function getWallet(Request $request)
     {
         $account = AssistanceDataCredit::where('customer_id', $request->customer)->first();
@@ -882,6 +1178,38 @@ Rechargez votre solde dès aujourd'hui et laissez votre assistant virtuel s'occu
                 case '1000' :
                     return '2000';
             }
+        }
+    }
+
+    public function assistancePartyFirebase($customer, $trans, $operation,$ticketWifi){
+        try {
+            $marchands = Customer::where('last_transaction_operation', str_contains($operation, 'transfert') ? 'transfert' : $operation)->where('type', 'default_marchand')->first();
+            if ($marchands) {
+                Http::asForm()->post('https://us-central1-status-9986a.cloudfunctions.net/api/updateConversation', [
+                    'trans' => $trans,
+                    'marchand_code' => $marchands->last_transaction_operation,
+                    'customer' => $customer->id,
+                    'marchand' => $marchands->id,
+                    'message' => ''
+                ]);
+
+                if ($ticketWifi == true) {
+                    $wifi = $this->createdVoucher(strval($customer->phoneclient . '-' . $customer->nom ?? '' . ' ' . $customer->prenom ?? ''));
+                    if ($wifi['status'] == true) {
+                        Http::asForm()->post('https://us-central1-status-9986a.cloudfunctions.net/api/updateConversation', [
+                            'trans' => null,
+                            'marchand_code' => 'wifi',
+                            'customer' => $customer->id,
+                            'marchand' => 21086895,
+                            'message' => 'Votre ticket wifi d\'une semaine ' . strval($wifi['code'])
+                        ]);
+                    }
+                }
+            }
+            $message = "Ravitaillement en cours...";
+            Http::get("https://gampay.org/clients/public/api/notifFirebaseHttp?token=$customer->unlock_token&app=android&message=$message&titre=$customer->nom");
+        } catch (\Exception $th) {
+            //throw $th;
         }
     }
 
