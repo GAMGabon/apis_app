@@ -3988,10 +3988,10 @@ class CustomerController extends Controller
         }
     }
 
-    public function countScoreCustomer(Request $request){
 
+    public function countScoreCustomer(Request $request){
         Http::get('http://gampay.app/gamclients/public/api/recupIdCustomer');
-        $trans = DB::select("select * from historiquetrans h where h.operation NOT in ('recharge_compte_gam', 'recieve_gam_transfert', 'emit_gam_transfert', 'gam_transfert', 'rendu_monnaie_simple','demande_solde', 'debit') and h.reference <> 'bonus' and (h.param5 is NULL or (h.param5 !='point' || h.param5 !='point_wallet_charge' || h.param5 !='point_wallet_no_charge')) and (h.param8 is NULL or h.param8 !='partenaire') and h.etat in ('CONFIRMEE', 'confirme') and h.id>=38336879 limit 10");
+        $trans = DB::select("select * from historiquetrans h where h.operation NOT in ('recharge_compte_gam', 'recieve_gam_transfert', 'emit_gam_transfert', 'gam_transfert', 'rendu_monnaie_simple','demande_solde', 'debit') and h.reference <> 'bonus' and (h.param5 is NULL or (h.param5 !='point' and h.param5 !='point_wallet_charge' and h.param5 !='point_wallet_no_charge')) and (h.param8 is NULL or h.param8 !='partenaire') and h.etat in ('CONFIRMEE', 'confirme') and h.id>=38336879 limit 10");
         if(count($trans)>0){
             foreach ($trans as $tran){
                 $customer = Customer::where('phoneclient',$tran->phonevendeur)->first();
@@ -4017,6 +4017,7 @@ class CustomerController extends Controller
                         }
                     }
 
+
                     Customer::where('id', $customer->id)->update([
                         'option1' => $newOption1,
                         'score'=>$customer->score != null? $customer->score + 1 : 1,
@@ -4025,6 +4026,7 @@ class CustomerController extends Controller
                         'last_transaction_operation' => $tran->operation,
                         'flp_point_caisse' => in_array($tran->operation, ['transfert_mobile','recharge_visa_uba', 'achat_wifi'])? 'service_client' : $customer->flp_point_caisse
                     ]);
+                    Http::get("https://gampay.app/gamclients/public/api/countProgression?phone=$tran->phonevendeur&product=app&value=$customer->score&id=$customer->id");
 
                     $getDataTrans = '50';
                     if(!in_array($tran->reference, ['AUTO', '1', '2', '3', '4', '5', '6', '7', '8', '9'])){
@@ -4076,15 +4078,14 @@ class CustomerController extends Controller
                         $qte_credit = $tran->param8;
                         $qte_data = $tran->param9;
                     }
-                    $agent->rechargeCallTimeOrDataIn($tran->id, $tran->numclient, $tran->operation, $qte_credit, $qte_data, $amount);
+                    if($qte_data != null){
+                        $agent->rechargeCallTimeOrDataIn($tran->id, $tran->numclient, 'achat_forfait', null, $qte_data, 0);
+                    }
+                    if( $qte_credit != null || $amount != 0){
+                        $agent->rechargeCallTimeOrDataIn($tran->id, $tran->numclient, 'achat_credit', $qte_credit, null, $amount);
+                    }
                 }
                 /****************** End Recharge Call time or Data Assistance *****************/
-                // calcul call time
-                //Http::get("https://gampay.app/gamclients/public/api/calculTimeCallUssd?numeroclient=$tran->numeroclient&price=$tran->montant");
-
-                Http::get("https://gampay.org/gamclients/public/api/getCountTraficCustomerTaxi?phonevendeur=$tran->phonevendeur&montant=$tran->frais");
-                Http::get('https://gampay.org/gamclients/public/api/getAlerteNewCommandCardVisaUBAWait');
-                Http::get('https://gampay.org/gamclients/public/api/getAlerteNewCommandCardVisaUBA');
             }
             $this->countScoreCustomerUssd();
             return [$trans, $request->customer];
@@ -4094,17 +4095,53 @@ class CustomerController extends Controller
         }
     }
 
+    public function countScoreCustomerEdan(){
+        $trans = DB::select("select * from gam_electricite_hist geh where geh.param4 is null and geh.etat in ('confirm', 'CONFIRMEE') and geh.id>2445 and deleted_at is null limit 20 ");
+        if(count($trans)>0){
+            foreach ($trans as $tran){
+                $customer = Customer::where('phoneclient',$tran->num_client)->first();
+                if($customer){
+                    Customer::where('id', $customer->id)->update([
+                        'score'=>$customer->score != null? $customer->score + 1 : 1
+                    ]);
+
+                    GamElectriciteHist::where('id', $tran->id)->update([
+                        'param4'=>'point'
+                    ]);
+
+                    if(str_contains($customer->grade, 'reveilII')){
+                        $backup = WhatsAppBackUp::where('messageId', $customer->grade)->whereNull('trafic')->first();
+                        if($backup){
+                            WhatsAppBackUp::where('id', $backup->id)->update([
+                                'trafic' => 'ok'
+                            ]);
+                        }
+                    }
+
+                    if(!empty($customer->phoneparent) && !empty($customer->expirationparrainage) && $customer->expirationparrainage != 'off' &&  $customer->flp_point_caisse!= 'valide'){
+                        Customer::where('id', $customer->id)->update([
+                            'flp_point_caisse'=> 'valide'
+                        ]);
+                        $parrain = Customer::where('phoneclient',$customer->phoneparent)->first();
+                        if($parrain){
+                            Customer::where('id', $parrain->id)->update([
+                                'type'=> empty($parrain->type)? 'CLIENT_LAMBDA' : $parrain->type
+                            ]);
+                        }
+                    }
+                    if(!empty($customer->phoneparent) && !empty($customer->expirationparrainage) && $customer->expirationparrainage != 'off'){
+                        $this->addCommissionParrain($tran->id, $customer->id, 'edan');
+                    }
+
+                }
+            }
+        }
+        return $trans;
+    }
 
     public function countScoreCustomerUssd(){
-        $trans = DB::select("select * from gamrechargehist h where h.deleted_at is null and port = '6A' and h.etat like '%succes%' and (h.param4 !='point' or h.param4 is NULL) and id>=109163857 order by id desc limit 5");
 
-
-        /*if(empty($request->trans)){
-            $trans = DB::select("select * from gamrechargehist h where h.deleted_at is null and port = '6A' and h.etat like '%succes%' and h.param4 ='param4' and id>=106849997 order by id desc limit 5");
-        }else{
-            $trans = GamRechargeHist::where('id', $request->trans)->get();
-        }*/
-
+        $trans = DB::select("select * from gamrechargehist h where h.deleted_at is null and port = '6A' and h.etat like '%succes%' and (h.param4 is NULL or (h.param4 !='point' and h.param4 !='point_wallet_charge' and h.param4 !='point_wallet_no_charge')) and id>=109163857 order by id desc limit 5");
         if(count($trans)>0){
             foreach ($trans as $tran){
                 $customer = Client2::where('numclient',$tran->phonevendeur)->first();
@@ -4112,7 +4149,7 @@ class CustomerController extends Controller
                     $pack = false; // mise à jour le 16-09-2026
                     $product = 'ussd';
                     $value = $customer->score;
-                    if(in_array($tran->montant,[1200,2200,5200,10200])){
+                    if(in_array($tran->montant,['1200','2200','5200','10200'])){
                         $product = 'pack';
                         $pack = true;
                     }
@@ -4198,17 +4235,43 @@ class CustomerController extends Controller
                 // calcul call time
                 Http::get("https://gampay.app/gamclients/public/api/calculTimeCallUssd?numeroclient=$tran->numeroclient&price=$tran->montant");
                 //$this->sendTemplateCustomerUssd($tran, $customerApp);
-                Http::get("https://gampay.org/gamclients/public/api/getCountTraficCustomerProvince?phonevendeur=$tran->phonevendeur&numeroclient=$tran->numeroclient&montant=$tran->montant");
-                Http::get("https://gampay.org/gamclients/public/api/newGetCustomerComm?phonevendeur=$tran->phonevendeur&montant=$tran->montant&numeroclient=$tran->numeroclient");
-                Http::get("https://gampay.org/gamclients/public/api/updateTransCustomerOrFilleulHabituel?phone=$tran->phonevendeur");
-                Http::get("https://gampay.org/gamclients/public/api/getAlerteCustomerCallingByAgent?numclient=$tran->phonevendeur");
-                Http::get("https://gampay.org/gamclients/public/api/getCustomerHabituelUssdMessageVisa?phonevendeur=$tran->phonevendeur&numeroclient=$tran->numeroclient&montant=$tran->montant");
-                Http::get("https://gampay.org/gamclients/public/api/getCountTraficCustomerTaxi?phonevendeur=$tran->phonevendeur&montant=100");
-                Http::get("https://gampay.org/gamclients/public/api/sendDataCustomerCallingByAgentAfterTrafic?phonevendeur=$tran->phonevendeur");
-                Http::get("https://gampay.org/gamclients/public/api/getCountSendCodeNewParrainageCustomerUssd?phonevendeur=$tran->phonevendeur&montant=$tran->montant");
-
+                $frais = 100;
+                if(intval($tran->montant)<200){
+                    $frais = 20;
+                }
+                $amount = intval($tran->montant)-$frais;
+                $qte_data = null;
+                $qte_credit = null;
+                $agent = new AgentController();
+                if( in_array($tran->montant, ['1200', '2200' , '5200' , '10200'])){
+                    switch ($tran->montant){
+                        case '1200' :
+                            $qte_credit = '500';
+                            $qte_data= '1000';
+                            break;
+                        case '2200' :
+                            $qte_credit = '1000';
+                            $qte_data= '2000';
+                            break;
+                        case '5200' :
+                            $qte_credit = '3000';
+                            $qte_data= '5000';
+                            break;
+                        case '10200' :
+                            $qte_credit = '5000';
+                            $qte_data= '14000';
+                            break;
+                    }
+                }
+                if($qte_data != null){
+                    $agent->rechargeCallTimeOrDataIn($tran->id, $tran->numeroclient, 'achat_forfait', null, $qte_data, 0, 'ussd');
+                }
+                if( $qte_credit != null || $amount != 0){
+                    $agent->rechargeCallTimeOrDataIn($tran->id, $tran->numeroclient, 'achat_credit', $qte_credit, null, $amount, 'ussd');
+                }
             }
         }
+        $this->countScoreCustomerEdan();
         return $trans;
     }
 
@@ -6687,6 +6750,7 @@ Nous restons à votre écoute pour toutes vos préoccupations." ;
         } else {
             return $result;
         }
+        // Close handle
         curl_close($curl);
     }
 
@@ -6696,6 +6760,7 @@ Nous restons à votre écoute pour toutes vos préoccupations." ;
 
     public function getDataTransConfirm($ref){
         $data = GamRechargeHist::where('reference', $ref)->where('etat', 'sent	tonumbergam')->first();
+        //return $data;
         if($data){
             if(str_contains(strval($data->content), 'solde')){
                 if($data->sender == 'Moov Money'){
@@ -6862,6 +6927,7 @@ Nous restons à votre écoute pour toutes vos préoccupations." ;
                 'solde' =>'0 FCFA'
             ]);
         }
+
     }
 
 }

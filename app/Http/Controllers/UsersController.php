@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\Client2;
 use App\Models\Customer;
+use App\Models\ConfigSim;
 use App\Models\Payment;
 use App\Models\WhatsAppBackUp;
 use App\Models\GamElectriciteHist;
@@ -892,11 +893,24 @@ class UsersController
     public function registerConfigSims(Request $request){
         $customer = Customer::where('id', $request->id)->first();
         if($customer){
-            $this->resetConfig($request->data);
+            $this->resetConfig($request->data, $customer->id);
             $customer->update(['config_sims' => json_encode($request->data)]);
+            // Suivi crédit / forfait par SIM (table config_sims)
+            $simsErreur = null;
+            try {
+                $sims = ConfigSim::synchroniser($customer->id, $request->data);
+            } catch (\Throwable $th) {
+                // La config est enregistrée, mais pas les lignes SIM :
+                // on renvoie la cause pour pouvoir la corriger.
+                $sims = [];
+                $simsErreur = $th->getMessage();
+                \Illuminate\Support\Facades\Log::error('registerConfigSims config_sims : ' . $simsErreur);
+            }
             return response()->json([
                 'statut'=> true,
-                'body'=> $customer
+                'body'=> $customer,
+                'sims'=> $sims,
+                'sims_erreur'=> $simsErreur
             ]);
         }
         return response()->json([
@@ -905,17 +919,23 @@ class UsersController
         ]);
     }
 
-    public function resetConfig($data){
+    public function resetConfig($data, $customerId = null){
         try {
             for ($i = 0; $i < count($data); $i++) {
-                $customers = Customer::where('config_sims', 'like', "%{$data['$i']['number']}%")->get();
+                // (corrigé : $data['$i'] cherchait la clé littérale '$i')
+                if (empty($data[$i]['number'])) {
+                    continue;
+                }
+                $customers = Customer::where('config_sims', 'like', "%{$data[$i]['number']}%")
+                    ->when($customerId, fn ($q) => $q->where('id', '!=', $customerId))
+                    ->get();
                 if (count($customers) > 0) {
                     foreach ($customers as $customer) {
                         Customer::where('id', $customer->id)->update(['config_sims' => null]);
                     }
                 }
             }
-        } catch (\Exception $th) {
+        } catch (\Throwable $th) {
             //throw $th;
         }
     }
@@ -937,7 +957,7 @@ class UsersController
                     ) t
                     WHERE num = $customer->num");
             return response()->json([
-                 'rang' => $rang,
+                'rang' => $rang,
                 'statut'=> true,
                 'body'=> $customer
             ]);
@@ -999,6 +1019,4 @@ class UsersController
         }
 
     }
-
-
 }

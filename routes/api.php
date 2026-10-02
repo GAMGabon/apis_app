@@ -335,6 +335,17 @@ Route::post('getTransTestInterne',[\App\Http\Controllers\ServicesController::cla
 Route::get('getCustomerAction',[\App\Http\Controllers\ServicesController::class, 'getCustomerAction']);
 Route::post('getCustomerAction',[\App\Http\Controllers\ServicesController::class, 'getCustomerAction']);
 
+/*************** Revente d'actions EMOTION **************/
+Route::post('getMesActionsVendables',[\App\Http\Controllers\VenteActionController::class, 'getMesActionsVendables']);
+Route::post('mettreActionsEnVente',[\App\Http\Controllers\VenteActionController::class, 'mettreActionsEnVente']);
+Route::post('annulerVenteAction',[\App\Http\Controllers\VenteActionController::class, 'annulerVenteAction']);
+Route::post('getActionsEnVente',[\App\Http\Controllers\VenteActionController::class, 'getActionsEnVente']);
+Route::post('reserverAchatAction',[\App\Http\Controllers\VenteActionController::class, 'reserverAchatAction']);
+Route::post('annulerReservationAction',[\App\Http\Controllers\VenteActionController::class, 'annulerReservationAction']);
+Route::post('validerAchatActionRevente',[\App\Http\Controllers\VenteActionController::class, 'validerAchatActionRevente']);
+Route::get('traiterAchatsRevente',[\App\Http\Controllers\VenteActionController::class, 'traiterAchatsRevente']);
+Route::post('traiterAchatsRevente',[\App\Http\Controllers\VenteActionController::class, 'traiterAchatsRevente']);
+
 Route::get('getForfaitDataCredit',[\App\Http\Controllers\ServicesController::class, 'getForfaitDataCredit']);
 Route::post('getForfaitDataCredit',[\App\Http\Controllers\ServicesController::class, 'getForfaitDataCredit']);
 
@@ -641,12 +652,18 @@ Route::post('rechargeWallet',[\App\Http\Controllers\AgentController::class, 'rec
 Route::get('udateCallTimeOnline',[\App\Http\Controllers\AgentController::class, 'udateCallTimeOnline']);
 Route::post('udateCallTimeOnline',[\App\Http\Controllers\AgentController::class, 'udateCallTimeOnline']);
 
+Route::get('udateSimsOnline',[\App\Http\Controllers\AgentController::class, 'udateSimsOnline']);
+Route::post('udateSimsOnline',[\App\Http\Controllers\AgentController::class, 'udateSimsOnline']);
+
 Route::get('calculTimeCallUssd',[\App\Http\Controllers\AgentController::class, 'calculTimeCallUssd']);
 Route::post('calculTimeCallUssd',[\App\Http\Controllers\AgentController::class, 'calculTimeCallUssd']);
 
 
 Route::get('rechargeCallTimeOrData',[\App\Http\Controllers\AgentController::class, 'rechargeCallTimeOrData']);
 Route::post('rechargeCallTimeOrData',[\App\Http\Controllers\AgentController::class, 'rechargeCallTimeOrData']);
+
+Route::post('dataAssistance',[\App\Http\Controllers\AgentController::class, 'dataAssistance']);
+Route::post('creditAssistance',[\App\Http\Controllers\AgentController::class, 'creditAssistance']);
 /********************************************************************************** End AgentController Controller route **************************************************************************************/
 
 

@@ -5,8 +5,10 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\DetatilsOperation;
+use App\Models\GamRechargeHist;
 use App\Models\Historiquetrans;
 use App\Models\AssistanceDataCredit;
+use App\Models\ConfigSim;
 use App\Models\GeneralController;
 use App\Models\ForfaitDataCredit;
 use Illuminate\Http\Request;
@@ -16,6 +18,16 @@ use Exception;
 
 class AgentController extends Controller
 {
+    /**
+     * Plus petit forfait internet fourni par chaque opérateur.
+     * Utilisé par dataAssistance quand le solde ne peut payer aucun des
+     * forfaits "Forfait" disponibles (dépannage internet).
+     */
+    private $petitForfaitData = [
+        'airtel' => ['price' => 150, 'qte' => '20', 'validity' => null],   // 150 F = 20 Mo
+        'moov' => ['price' => 100, 'qte' => '100', 'validity' => '1H'],    // Libertis : 100 F = 100 Mo / 1 h
+    ];
+
     public function verifTrans()
     {
         try {
@@ -53,18 +65,6 @@ class AgentController extends Controller
                                 break;
                         }
 
-
-
-                        /*if($reload){
-                            Historiquetrans::where('id', $tran->id)->update([
-                                'param2' => null,
-                                'etat' => $etat,
-                                'operation'=> $operation,
-                                'content' => $content,
-                                'timestamps' => date('Y-m-d H:i:s'),
-                                'code_validation' => 'traite',
-                            ]);
-                        }*/
                     } catch (Exception $e) {
                         // send error treatment
                         Historiquetrans::where('id', $tran->id)->update([
@@ -412,294 +412,274 @@ class AgentController extends Controller
         }
     }
 
-    public function creditAssistance(Request $request){
-        try {
-            $customer = Customer::where('id', $request->customer)->first();
-            $ticketWifi = false;
-            $amount = 0;
-            $frais = 0;
-            $operation = 'data_credit';
-            $receveur = $request->receveur;
-            $operateur = $request->operateur;
-            $account = AssistanceDataCredit::where('customer_id', $customer->id)->first();
-            $forfait = null;
-            if ($account) {
-               if($account->solde >= $account->defaut_credit && $operateur == $account->operateur){
-                   // creation de l'operation achat du pack
-                   $forfait = ForfaitDataCredit::where('price', strval($account->defaut_credit))->where('operateur', $operateur == 'AIRTEL_GA' ? 'airtel' : 'moov')->first();
-               }else{
-                   $forfaitEquivalent = ForfaitDataCredit::where('price','<=', strval($account->solde))->where('price','<=', strval($account->defaut_credit))->where('operateur', $request->operateur == 'AIRTEL_GA' ? 'airtel' : 'moov')->first();
-                   if($forfaitEquivalent){
-                       $forfait = $forfaitEquivalent;
-                   }else{
-                      if($account->solde >= 120){
-                          $operation = 'achat_credit';
-                          // creation de l'achat crédit
-                          if($account->solde >= 200){
-                              $frais = 100;
-                          }else{
-                              $frais = 20;
-                          }
-                          $amount = $account->solde - $frais;
-
-                      }else{
-                          return response()->json([
-                              'statut' => true,
-                              'action' => 'charge'
-                          ]);
-                      }
-                   }
-               }
-
-                $trans = new Historiquetrans([
-                    'operation' => $operation,
-                    'reference' =>  'MP_assistance',
-                    'numclient' => $receveur,
-                    'phonevendeur' => $account->customer_phone,
-                    'content' => $operateur ,
-                    'montant' => strval(intval($amount) + intval($frais)),
-                    'montant_sans_frais' => strval($amount),
-                    'frais' => strval($frais),
-                    'solde' => $account->solde,
-                    'origine_operation' => 'assistant',
-                    'id_customer' => $account->customer_id
-                ]);
-                $trans->save();
-                if ($trans->id) {
-                    $newSolde = $trans->montant;
-                    if (!empty($account->solde)) {
-                        $newSolde = $account->solde - intval($trans->montant);
-                    }
-                    $account->update([
-                        'solde' => $newSolde,
-                        'operateur' => $operateur,
-                    ]);
-
-                    if($forfait != null){
-                        $details_operation = [];
-                        if ($forfait->qte_flex != null) {
-                            array_push($details_operation, array(
-                                'operation' => 'flex',
-                                'qte' => $forfait->qte_flex,
-                                'name' => 'flex',
-                                'status' => 'wait',
-                                'validity' => $forfait->validity_flex,
-                                'transaction_id' => $trans->id,
-                                'numclient' => $receveur,
-                                'operateur' => $operateur,
-                                'reference' => 'MP_assistance',
-                            ));
-                        }
-
-                        if ($forfait->qte_min != null) {
-                            array_push($details_operation, array(
-                                'operation' => $operateur == 'AIRTEL_GA' ? 'achat_credit' : 'Appels',
-                                'qte' => $operateur == 'AIRTEL_GA' ? $forfait->param2 : $forfait->qte_min,
-                                'name' => 'Appels',
-                                'status' => 'wait',
-                                'validity' => $forfait->validity_min,
-                                'transaction_id' => $trans->id,
-                                'numclient' => $receveur,
-                                'operateur' => $operateur,
-                                'reference' => 'MP_assistance',
-                            ));
-                        }
-
-                        if ($forfait->qte_mega != null) {
-                            array_push($details_operation, array(
-                                'operation' => 'achat_forfait',
-                                'qte' => $forfait->qte_mega,
-                                'name' => 'achat_forfait',
-                                'status' => 'wait',
-                                'validity' => $forfait->validity_mega,
-                                'transaction_id' => $trans->id,
-                                'numclient' => $receveur,
-                                'operateur' => $operateur,
-                                'reference' => 'MP_assistance',
-                            ));
-                        }
-
-                        if ($forfait->ticket_wifi != null) {
-                            $ticketWifi = true;
-                        }
-
-                        for ($i = 0; $i < count($details_operation); $i++) {
-                            $details = new DetatilsOperation($details_operation[$i]);
-                            $details->save();
-                        }
-                        $account->update([
-                            'etat' => 'atraiter'
-                        ]);
-                    }
-
-                    $this->assistancePartyFirebase($customer,$trans, $operation, $ticketWifi);
-
-                    return response()->json([
-                        'statut' => true,
-                        'trans' => $trans,
-                        'action' => 'next'
-                    ]);
-
-                }else{
-                    return response()->json([
-                        'statut' => false,
-                        'action' => 'no trans'
-                    ]);
-                }
-            } else {
-                return response()->json([
-                    'statut' => false,
-                    'action' => 'no wallet'
-                ]);
-            }
-        } catch (\Exception $th) {
-            return response()->json([
-                'statut' => false,
-                'action' => 'error'
-            ]);
-        }
+    /**
+     * Assistance pendant un appel : forfait crédit par défaut (defaut_credit),
+     * sinon forfait "Appels" équivalent, sinon achat de crédit, sinon recharge.
+     */
+    public function creditAssistance(Request $request)
+    {
+        return $this->assistanceForfait($request, 'Appels', 'defaut_credit', true);
     }
 
-    public function dataAssistance(Request $request){
+    /**
+     * Assistance forfait internet : forfait internet par défaut (defaut_mega),
+     * sinon forfait "Forfait" équivalent, sinon recharge du wallet.
+     */
+    public function dataAssistance(Request $request)
+    {
+        return $this->assistanceForfait($request, 'Forfait', 'defaut_mega', false);
+    }
+
+    /**
+     * Décode un forfait par défaut stocké au format "operateur_prix"
+     * (ex. "airtel_1200"). L'ancien format (prix seul) est accepté.
+     */
+    private function decoderForfaitDefaut($code)
+    {
+        $code = trim((string) $code);
+        if ($code === '' || $code === 'null') {
+            return null;
+        }
+
+        // Mode "Crédit uniquement" : "airtel_500_creditOnly"
+        $creditOnly = false;
+        $suffixe = '_creditonly';
+        if (str_ends_with(strtolower($code), $suffixe)) {
+            $creditOnly = true;
+            $code = substr($code, 0, -strlen($suffixe));
+        }
+
+        $pos = strrpos($code, '_');
+        if ($pos === false) {
+            return ['operateur' => null, 'price' => intval($code), 'creditOnly' => $creditOnly];
+        }
+        return [
+            'operateur' => strtolower(substr($code, 0, $pos)),
+            'price' => intval(substr($code, $pos + 1)),
+            'creditOnly' => $creditOnly,
+        ];
+    }
+
+    /**
+     * Logique commune à creditAssistance et dataAssistance.
+     *
+     * @param string $nomForfait   'Appels' (crédit) ou 'Forfait' (internet)
+     * @param string $colonneDefaut 'defaut_credit' ou 'defaut_mega'
+     * @param bool   $achatCredit  autoriser l'achat de crédit simple si aucun forfait
+     */
+    private function assistanceForfait(Request $request, $nomForfait, $colonneDefaut, $achatCredit)
+    {
         try {
             $customer = Customer::where('id', $request->customer)->first();
+            if (!$customer) {
+                return response()->json(['statut' => false, 'action' => 'no customer']);
+            }
+
+            $account = AssistanceDataCredit::where('customer_id', $customer->id)->first();
+            if (!$account) {
+                return response()->json(['statut' => false, 'action' => 'no wallet']);
+            }
+
             $ticketWifi = false;
             $amount = 0;
             $frais = 0;
             $operation = 'data_credit';
             $receveur = $request->receveur;
-            $operateur = $request->operateur;
-            $account = AssistanceDataCredit::where('customer_id', $customer->id)->first();
+            $operateur = $request->operateur; // 'AIRTEL_GA' | 'LIBERTIS'
+            $opForfait = $operateur == 'AIRTEL_GA' ? 'airtel' : 'moov';
+            $solde = intval($account->solde);
             $forfait = null;
-            if ($account) {
-                if($account->solde >= $account->defaut_credit && $operateur == $account->operateur){
-                    // creation de l'operation achat du pack
-                    $forfait = ForfaitDataCredit::where('price', strval($account->defaut_credit))->where('operateur', $operateur == 'AIRTEL_GA' ? 'airtel' : 'moov')->first();
-                }else{
-                    $forfaitEquivalent = ForfaitDataCredit::where('price','<=', strval($account->solde))->where('price','<=', strval($account->defaut_credit))->where('operateur', $request->operateur == 'AIRTEL_GA' ? 'airtel' : 'moov')->first();
-                    if($forfaitEquivalent){
-                        $forfait = $forfaitEquivalent;
-                    }else{
-                        if($account->solde >= 120){
-                            $operation = 'achat_credit';
-                            // creation de l'achat crédit
-                            if($account->solde >= 200){
-                                $frais = 100;
-                            }else{
-                                $frais = 20;
-                            }
-                            $amount = $account->solde - $frais;
+            $qteForfaitTrans = null;
+            $qteCallTimeTrans = null;
 
-                        }else{
-                            return response()->json([
-                                'statut' => true,
-                                'action' => 'charge'
-                            ]);
-                        }
-                    }
-                }
+            // 1. Forfait par défaut, s'il est de l'opérateur de la SIM et que le solde suffit
+            // Offre choisie à l'achat direct dans l'app ("operateur_prix"),
+            // sinon le forfait par défaut du wallet
+            $codeForfait = trim((string) $request->forfait_choisi) !== ''
+                ? $request->forfait_choisi
+                : $account->{$colonneDefaut};
+            $defaut = $this->decoderForfaitDefaut($codeForfait);
+            $prixDefaut = $defaut ? $defaut['price'] : 0;
+            $memeOperateur = $defaut && ($defaut['operateur'] === null || $defaut['operateur'] == $opForfait);
 
-                $trans = new Historiquetrans([
-                    'operation' => $operation,
-                    'reference' =>  'MP_assistance',
-                    'numclient' => $receveur,
-                    'phonevendeur' => $account->customer_phone,
-                    'content' => $operateur ,
-                    'montant' => strval(intval($amount) + intval($frais)),
-                    'montant_sans_frais' => strval($amount),
-                    'frais' => strval($frais),
-                    'solde' => $account->solde,
-                    'origine_operation' => 'assistant',
-                    'id_customer' => $account->customer_id
-                ]);
-                $trans->save();
-                if ($trans->id) {
-                    $newSolde = $trans->montant;
-                    if (!empty($account->solde)) {
-                        $newSolde = $account->solde - intval($trans->montant);
-                    }
-                    $account->update([
-                        'solde' => $newSolde,
-                        'operateur' => $operateur,
-                    ]);
+            // Mode "Crédit uniquement" (defaut_credit = "airtel_500_creditOnly") :
+            // le client n'a souscrit à aucun forfait, on ne lui envoie que du crédit.
+            $creditSeul = $achatCredit && $defaut && $defaut['creditOnly'];
 
-                    if($forfait != null){
-                        $details_operation = [];
-                        if ($forfait->qte_flex != null) {
-                            array_push($details_operation, array(
-                                'operation' => 'flex',
-                                'qte' => $forfait->qte_flex,
-                                'name' => 'flex',
-                                'status' => 'wait',
-                                'validity' => $forfait->validity_flex,
-                                'transaction_id' => $trans->id,
-                                'numclient' => $receveur,
-                                'operateur' => $operateur,
-                                'reference' => 'MP_assistance',
-                            ));
-                        }
-
-                        if ($forfait->qte_min != null) {
-                            array_push($details_operation, array(
-                                'operation' => $operateur == 'AIRTEL_GA' ? 'achat_credit' : 'Appels',
-                                'qte' => $operateur == 'AIRTEL_GA' ? $forfait->param2 : $forfait->qte_min,
-                                'name' => 'Appels',
-                                'status' => 'wait',
-                                'validity' => $forfait->validity_min,
-                                'transaction_id' => $trans->id,
-                                'numclient' => $receveur,
-                                'operateur' => $operateur,
-                                'reference' => 'MP_assistance',
-                            ));
-                        }
-
-                        if ($forfait->qte_mega != null) {
-                            array_push($details_operation, array(
-                                'operation' => 'achat_forfait',
-                                'qte' => $forfait->qte_mega,
-                                'name' => 'achat_forfait',
-                                'status' => 'wait',
-                                'validity' => $forfait->validity_mega,
-                                'transaction_id' => $trans->id,
-                                'numclient' => $receveur,
-                                'operateur' => $operateur,
-                                'reference' => 'MP_assistance',
-                            ));
-                        }
-
-                        if ($forfait->ticket_wifi != null) {
-                            $ticketWifi = true;
-                        }
-
-                        for ($i = 0; $i < count($details_operation); $i++) {
-                            $details = new DetatilsOperation($details_operation[$i]);
-                            $details->save();
-                        }
-                        $account->update([
-                            'etat' => 'atraiter'
-                        ]);
-                    }
-
-                    $this->assistancePartyFirebase($customer,$trans, $operation, $ticketWifi);
-
+            if ($creditSeul) {
+                if ($solde < 120) {
                     return response()->json([
                         'statut' => true,
-                        'trans' => $trans,
-                        'action' => 'next'
-                    ]);
-
-                }else{
-                    return response()->json([
-                        'statut' => false,
-                        'action' => 'no trans'
+                        'action' => 'charge'
                     ]);
                 }
+                $operation = 'achat_credit';
+                $frais = $solde >= 200 ? 100 : 20;
+                // montant par défaut, ou ce que le solde permet
+                $amount = min($prixDefaut, $solde - $frais);
+            } elseif ($defaut && $memeOperateur && $solde >= $prixDefaut) {
+                $forfait = ForfaitDataCredit::where('name', $nomForfait)
+                    ->where('operateur', $opForfait)
+                    ->whereRaw('CAST(price AS UNSIGNED) = ?', [$prixDefaut])
+                    ->first();
+            }
+
+            // 2. Sinon, le forfait le plus proche que le solde permet
+            //    (sans dépasser le forfait par défaut)
+            if (!$forfait && !$creditSeul) {
+                $requete = ForfaitDataCredit::where('name', $nomForfait)
+                    ->where('operateur', $opForfait)
+                    ->whereRaw('CAST(price AS UNSIGNED) <= ?', [$solde]);
+                if ($prixDefaut > 0) {
+                    $requete->whereRaw('CAST(price AS UNSIGNED) <= ?', [$prixDefaut]);
+                }
+                $forfait = $requete->orderByRaw('CAST(price AS UNSIGNED) DESC')->first();
+            }
+
+            $depannage = null;
+            if ($creditSeul) {
+                // déjà calculé plus haut : crédit uniquement
+            } elseif ($forfait) {
+                $amount = intval($forfait->price);
+            } elseif ($achatCredit && $solde >= 120) {
+                // 3a. Crédit : achat de crédit avec ce que le solde permet,
+                //     plafonné au montant du forfait crédit par défaut
+                $operation = 'achat_credit';
+                $frais = $solde >= 200 ? 100 : 20;
+                $amount = $solde - $frais;
+                if ($prixDefaut > 0) {
+                    $amount = min($prixDefaut, $amount);
+                }
+            } elseif (!$achatCredit && $solde >= $this->petitForfaitData[$opForfait]['price']) {
+                // 3b. Internet : plus petit forfait de l'opérateur (dépannage)
+                $depannage = $this->petitForfaitData[$opForfait];
+                $amount = $depannage['price'];
             } else {
+                // 4. Solde insuffisant : recharger le wallet
                 return response()->json([
-                    'statut' => false,
-                    'action' => 'no wallet'
+                    'statut' => true,
+                    'action' => 'charge'
                 ]);
             }
+
+            $reference = $depannage ? 'MP_depannage' : 'MP_assistance';
+
+            $trans = new Historiquetrans([
+                'operation' => $operation,
+                'reference' => $reference,
+                'numclient' => $receveur,
+                'phonevendeur' => $account->customer_phone,
+                'content' => $operateur,
+                'montant' => strval($amount + $frais),
+                'montant_sans_frais' => strval($amount),
+                'frais' => strval($frais),
+                'solde' => $account->solde,
+                'origine_operation' => 'assistant',
+                'id_customer' => $account->customer_id
+            ]);
+            $trans->save();
+
+            if (!$trans->id) {
+                return response()->json(['statut' => false, 'action' => 'no trans']);
+            }
+
+            $account->update([
+                'solde' => $solde - intval($trans->montant),
+                'operateur' => $operateur,
+                'depannage' => $depannage ? date('Y-m-d H:i:s') : null,
+            ]);
+
+            if ($depannage) {
+                $details = new DetatilsOperation([
+                    'operation' => 'achat_forfait',
+                    'qte' => $depannage['qte'],
+                    'name' => 'achat_forfait',
+                    'status' => 'wait',
+                    'validity' => $depannage['validity'],
+                    'transaction_id' => $trans->id,
+                    'numclient' => $receveur,
+                    'operateur' => $operateur,
+                    'reference' => $reference,
+                ]);
+                $details->save();
+                $qteForfaitTrans = $depannage['qte'];
+            }
+
+            if ($forfait != null) {
+                $details_operation = [];
+                if ($forfait->qte_flex != null) {
+                    array_push($details_operation, array(
+                        'operation' => 'flex',
+                        'qte' => $forfait->qte_flex,
+                        'name' => 'flex',
+                        'status' => 'wait',
+                        'validity' => $forfait->validity_flex,
+                        'transaction_id' => $trans->id,
+                        'numclient' => $receveur,
+                        'operateur' => $operateur,
+                        'reference' => 'MP_assistance',
+                    ));
+                    $qteCallTimeTrans =  ceil($forfait->qte_flex /174);
+                }
+
+                if ($forfait->qte_min != null) {
+                    array_push($details_operation, array(
+                        'operation' => $operateur == 'AIRTEL_GA' ? 'achat_credit' : 'Appels',
+                        'qte' => $operateur == 'AIRTEL_GA' ? $forfait->param2 : $forfait->qte_min,
+                        'name' => 'Appels',
+                        'status' => 'wait',
+                        'validity' => $forfait->validity_min,
+                        'transaction_id' => $trans->id,
+                        'numclient' => $receveur,
+                        'operateur' => $operateur,
+                        'reference' => 'MP_assistance',
+                    ));
+                    if($qteCallTimeTrans == null){
+                        $qteCallTimeTrans = intval($forfait->qte_min);
+                    }else{
+                        $qteCallTimeTrans = $qteCallTimeTrans + intval($forfait->qte_min);
+                    }
+                }
+
+                if ($forfait->qte_mega != null) {
+                    array_push($details_operation, array(
+                        'operation' => 'achat_forfait',
+                        'qte' => $forfait->qte_mega,
+                        'name' => 'achat_forfait',
+                        'status' => 'wait',
+                        'validity' => $forfait->validity_mega,
+                        'transaction_id' => $trans->id,
+                        'numclient' => $receveur,
+                        'operateur' => $operateur,
+                        'reference' => 'MP_assistance',
+                    ));
+                    $qteForfaitTrans = $forfait->qte_mega;
+                }
+
+                if ($forfait->ticket_wifi != null) {
+                    $ticketWifi = true;
+                }
+
+                for ($i = 0; $i < count($details_operation); $i++) {
+                    $details = new DetatilsOperation($details_operation[$i]);
+                    $details->save();
+                }
+            }
+
+            // La transaction n'est mise à traiter qu'une fois ses détails créés
+            $trans->update([
+                'etat' => 'atraiter',
+                'param8' => $qteCallTimeTrans,
+                'param9'=> $qteForfaitTrans
+            ]);
+
+            $this->assistancePartyFirebase($customer, $trans, $operation, $ticketWifi);
+
+            return response()->json([
+                'statut' => true,
+                'trans' => $trans,
+                'action' => $depannage ? 'depannage' : 'next'
+            ]);
         } catch (\Exception $th) {
             return response()->json([
                 'statut' => false,
@@ -737,29 +717,46 @@ Rechargez votre solde dès aujourd'hui et laissez votre assistant virtuel s'occu
 
     public function addWallet(Request $request)
     {
+        // Seules les valeurs réellement envoyées sont enregistrées :
+        // - forfait_credit / forfait_data vides ne doivent pas effacer
+        //   defaut_credit / defaut_mega ;
+        // - un montant à 0 (enregistrement des forfaits seul, depuis
+        //   Charger()) ne doit pas écraser amount_recharge, utilisé par le
+        //   retour de paiement pour créditer le wallet.
+        $donnees = [];
+        if (!empty($request->operateur)) {
+            $donnees['operateur'] = $request->operateur;
+        }
+        if (!empty($request->forfait)) {
+            $donnees['defaut_forfait'] = $request->forfait;
+        }
+        if (!empty($request->forfait_credit)) {
+            $donnees['defaut_credit'] = $request->forfait_credit;
+        }
+        if (!empty($request->forfait_data)) {
+            $donnees['defaut_mega'] = $request->forfait_data;
+        }
+        if (intval($request->amount) > 0) {
+            $donnees['amount_recharge'] = $request->amount;
+        }
+
         $account = AssistanceDataCredit::where('customer_id', $request->customer)->first();
         if ($account) {
-            $account->update([
-                'operateur' => $request->operateur,
-                'amount_recharge' => $request->amount,
-                'defaut_forfait' => $request->forfait
-            ]);
+            $account->update($donnees);
             return response()->json([
                 'statut' => true,
-                'body' => $account
+                'body' => $account->fresh()
             ]);
         } else {
-            $newWallet = new AssistanceDataCredit([
+            $newWallet = new AssistanceDataCredit(array_merge($donnees, [
                 'customer_id' => $request->customer,
                 'customer_phone' => $request->phone,
-                'defaut_forfait' => $request->forfait,
-                'operateur' => $request->operateur
-            ]);
+            ]));
             $newWallet->save();
 
             return response()->json([
                 'statut' => true,
-                'body' => $newWallet
+                'body' => $newWallet->fresh()
             ]);
         }
     }
@@ -780,6 +777,16 @@ Rechargez votre solde dès aujourd'hui et laissez votre assistant virtuel s'occu
             }
 
             $details = DetatilsOperation::where('transaction_id', $request->trans)->get();
+
+            // Opération uniquement internet (forfait ou dépannage internet) :
+            // aucun code flex / minutes à activer. Sans ça, un forfait
+            // "Appels" de même prix pouvait déclencher un USSD d'appel.
+            if (count($details) > 0 && $details->every(function ($d) {
+                    return $d->operation == 'achat_forfait';
+                })) {
+                $flex = null;
+            }
+
             if (count($details) > 0) {
                 return response()->json([
                     'statut' => true,
@@ -1051,6 +1058,88 @@ Rechargez votre solde dès aujourd'hui et laissez votre assistant virtuel s'occu
     }
 
 
+    /**
+     * Synchronisation du temps d'appel et du forfait PAR SIM.
+     *
+     * Entrée : customer (id), sims = [{slot, number, call_time, forfait,
+     *   forfait_last_verify_at, applied_call_time_recharge,
+     *   applied_call_time_change, applied_forfait_recharge,
+     *   applied_forfait_change}]
+     *   - call_time / forfait : valeurs actuelles côté app ;
+     *   - applied_* : recharges déjà ajoutées côté app, à retirer ici
+     *     (acquittement : une recharge arrivée entre-temps n'est pas perdue).
+     *
+     * Sortie : toutes les SIM du client, avec les recharges en attente.
+     */
+    public function udateSimsOnline(Request $request)
+    {
+        try {
+            $customer = Customer::where('id', $request->customer)->first();
+            if (!$customer) {
+                return response()->json(['statut' => false, 'message' => 'Pas de client']);
+            }
+
+            $sims = ConfigSim::pourCustomer($customer);
+
+            foreach (($request->sims ?? []) as $item) {
+                $sim = $sims->firstWhere('slot', intval($item['slot'] ?? -1));
+                if (!$sim) {
+                    continue;
+                }
+
+                $maj = ['updated_at' => now()];
+
+                // Valeurs de l'app, seulement si c'est bien la même SIM
+                $memeSim = empty($item['number']) || ConfigSim::memeNumero($item['number'], $sim->number);
+                if ($memeSim) {
+                    if (isset($item['call_time']) && is_numeric($item['call_time'])) {
+                        $maj['call_time'] = max(0, round(floatval($item['call_time']), 2));
+                    }
+                    if (isset($item['forfait']) && is_numeric($item['forfait'])) {
+                        $maj['forfait'] = max(0, round(floatval($item['forfait']), 3));
+                    }
+                    if (!empty($item['forfait_last_verify_at']) && $item['forfait_last_verify_at'] != 'null') {
+                        try {
+                            $maj['forfait_last_verify_at'] = \Carbon\Carbon::parse($item['forfait_last_verify_at'])->format('Y-m-d H:i:s');
+                        } catch (\Exception $th) {
+                        }
+                    }
+                }
+
+                // Acquittement des recharges appliquées par l'app
+                $appCall = round(floatval($item['applied_call_time_recharge'] ?? 0), 2);
+                $appData = round(floatval($item['applied_forfait_recharge'] ?? 0), 3);
+                if ($appCall > 0) {
+                    $maj['call_time_recharge'] = DB::raw('GREATEST(call_time_recharge - ' . number_format($appCall, 2, '.', '') . ', 0)');
+                }
+                if ($appData > 0) {
+                    $maj['forfait_recharge'] = DB::raw('GREATEST(forfait_recharge - ' . number_format($appData, 3, '.', '') . ', 0)');
+                }
+                $appCallChange = floatval($item['applied_call_time_change'] ?? 0);
+                $appDataChange = floatval($item['applied_forfait_change'] ?? 0);
+                if ($appCallChange > 0 && abs(floatval($sim->call_time_change) - $appCallChange) < 0.001) {
+                    $maj['call_time_change'] = 0;
+                }
+                if ($appDataChange > 0 && abs(floatval($sim->forfait_change) - $appDataChange) < 0.001) {
+                    $maj['forfait_change'] = 0;
+                }
+
+                ConfigSim::where('id', $sim->id)->update($maj);
+            }
+
+            return response()->json([
+                'statut' => true,
+                'sims' => ConfigSim::where('customer_id', $customer->id)->orderBy('slot')->get(),
+            ]);
+        } catch (\Exception $th) {
+            return response()->json([
+                'statut' => false,
+                'message' => 'error ' . $th->getMessage(),
+            ]);
+        }
+    }
+
+
     public function calculTimeCallUssd(Request $request)
     {
         $customer = Customer::where('config_sims', 'like', "%{$request->numeroclient}%")->orWhere('config_sims', 'like', "%{0$request->numeroclient}%")->first();
@@ -1079,6 +1168,11 @@ Rechargez votre solde dès aujourd'hui et laissez votre assistant virtuel s'occu
                     'call_time_recharge' => $time,
                     'forfait_qte_recharge' => empty($forfait) ? $account->forfait_qte_recharge : $account->forfait_qte_recharge + $forfait
                 ]);
+                // Suivi par SIM : la SIM rechargée
+                try {
+                    ConfigSim::ajouterRecharge($request->numeroclient, floor($montant * 100) / 100, empty($forfait) ? 0 : $forfait);
+                } catch (\Exception $th) {
+                }
                 return response()->json([
                     'statut' => true,
                     'time' => $time,
@@ -1089,73 +1183,125 @@ Rechargez votre solde dès aujourd'hui et laissez votre assistant virtuel s'occu
     }
 
     public function rechargeCallTimeOrData(Request $request){
-        return $this->rechargeCallTimeOrDataIn($request->trans, $request->receveur, $request->operation, $request->qte_credit, $request->qte_data,$request->amount);
+        return $this->rechargeCallTimeOrDataIn($request->trans, $request->receveur, $request->operation, $request->qte_credit, $request->qte_data,$request->amount, $request->type);
     }
 
-    public function rechargeCallTimeOrDataIn($trans, $receveur, $operation, $qte_credit, $qte_data,$amount){
+    public function rechargeCallTimeOrDataIn($trans, $receveur, $operation, $qte_credit, $qte_data,$amount, $type = 'gampay'){
         $response = [
             'statut' => false,
             'message' => 'no account'
         ];
         $status_operation = 'point_wallet_no_charge';
+
+        // Quantités à ravitailler (min d'appel / Mo)
+        $minutesRecharge = 0;
+        $megaRecharge = 0;
+        if ($operation == 'achat_credit' || $operation == 'data_credit') {
+            $minutesRecharge = $qte_credit == null ? ceil($amount / 174) : doubleval($qte_credit);
+        }
+        if ($operation != 'achat_credit') {
+            $megaRecharge = doubleval($qte_data);
+        }
+
+        // Suivi par SIM : la SIM qui a reçu le crédit / forfait, si son
+        // client est passé au suivi par SIM (sinon : wallet, plus bas).
         try {
-            $customers = DB::select(
-                "select * from customer where config_sims like ? or config_sims like ? limit 1",
-                ["%{$receveur}%", "%0{$receveur}%"]
-            );
-            if(count($customers)>0){
-                foreach ($customers AS $customer){
-                    $wallet = AssistanceDataCredit::where('customer_id', $customer->id)->first();
-                    if ($wallet) {
-                        $qteRechargeCallTime = doubleval($wallet->call_time_recharge);
-                        $qteRechargeData = doubleval($wallet->forfait_qte_recharge);
-                        if($operation == 'achat_credit'){
-                            if($qte_credit == null){
-                                $qteRechargeCallTime = $qteRechargeCallTime + ceil($amount/174);
-                            }else{
-                                $qteRechargeCallTime = $qteRechargeCallTime + $qte_credit;
-                            }
-                        }else if($operation == 'data_credit') {
-                            if($qte_credit == null){
-                                $qteRechargeCallTime = $qteRechargeCallTime + ceil($amount/174);
-                            }else{
-                                $qteRechargeCallTime = $qteRechargeCallTime + $qte_credit;
-                            }
-                            $qteRechargeData = $qteRechargeData + $qte_data;
-                        }else{
-
-                            $qteRechargeData = $qteRechargeData + $qte_data;
-                        }
-                        $wallet->update([
-                            'forfait_qte_recharge' => $qteRechargeData,
-                            'call_time_recharge' => $qteRechargeCallTime
-                        ]);
-                        $status_operation = 'point_wallet_charge';
-                        $response = [
-                            'statut' => true,
-                            'message' => 'wallet rechergé',
-                            'body' => $wallet
-                        ];
-                    } else {
-                        $response = [
-                            'statut' => false,
-                            'message' => 'no wallet',
-                            'account' => $customer
-                        ];
-                    }
-                }
-
+            $simRecue = ConfigSim::trouverParNumero($receveur);
+            if ($simRecue && $simRecue->customer_id && ConfigSim::clientSuiviParSim($simRecue->customer_id)) {
+                ConfigSim::ajouterRecharge($receveur, $minutesRecharge, $megaRecharge);
+                $status_operation = 'point_wallet_charge';
+                $response['sim'] = 'recharge';
             }
-        }catch (\Exception $th) {
-            return response()->json([
-                'statut' => false,
-                'action' => 'error ' . $th->getMessage()
+        } catch (\Exception $th) {
+        }
+
+        if($status_operation != 'point_wallet_charge'){
+            try {
+                $customers = DB::select(
+                    "select * from customer where config_sims like ? or config_sims like ? limit 1",
+                    ["%{$receveur}%", "%0{$receveur}%"]
+                );
+                if(count($customers)>0){
+                    foreach ($customers AS $customer){
+                        $wallet = AssistanceDataCredit::where('customer_id', $customer->id)->first();
+                        if ($wallet && intval($wallet->suivi_sim) === 1) {
+                            // Suivi par SIM. Si la SIM n'avait pas encore sa
+                            // ligne, on la crée depuis la config puis on recharge.
+                            if (empty($response['sim'])) {
+                                $client = Customer::where('id', $customer->id)->first();
+                                if ($client) {
+                                    ConfigSim::pourCustomer($client);
+                                }
+                                if (ConfigSim::ajouterRecharge($receveur, $minutesRecharge, $megaRecharge)) {
+                                    $response['sim'] = 'recharge';
+                                    $status_operation = 'point_wallet_charge';
+                                }
+                            }
+                            $response = [
+                                'statut' => true,
+                                'message' => 'sim rechargée',
+                                'sim' => $response['sim'] ?? null
+                            ];
+                        } elseif ($wallet) {
+                            $qteRechargeCallTime = doubleval($wallet->call_time_recharge);
+                            $qteRechargeData = doubleval($wallet->forfait_qte_recharge);
+                            if($operation == 'achat_credit'){
+                                if($qte_credit == null){
+                                    $qteRechargeCallTime = $qteRechargeCallTime + ceil($amount/174);
+                                }else{
+                                    $qteRechargeCallTime = $qteRechargeCallTime + $qte_credit;
+                                }
+                            }else if($operation == 'data_credit') {
+                                if($qte_credit == null){
+                                    $qteRechargeCallTime = $qteRechargeCallTime + ceil($amount/174);
+                                }else{
+                                    $qteRechargeCallTime = $qteRechargeCallTime + $qte_credit;
+                                }
+                                $qteRechargeData = $qteRechargeData + $qte_data;
+                            }else{
+
+                                $qteRechargeData = $qteRechargeData + $qte_data;
+                            }
+                            $wallet->update([
+                                'forfait_qte_recharge' => $qteRechargeData,
+                                'call_time_recharge' => $qteRechargeCallTime
+                            ]);
+                            $status_operation = 'point_wallet_charge';
+                            $response = [
+                                'statut' => true,
+                                'message' => 'wallet rechergé',
+                                'body' => $wallet
+                            ];
+                        } else {
+                            $response = [
+                                'statut' => false,
+                                'message' => 'no wallet',
+                                'account' => $customer,
+                                'sim' => $response['sim'] ?? null
+                            ];
+                        }
+                    }
+
+                }
+            }catch (\Exception $th) {
+                return response()->json([
+                    'statut' => false,
+                    'action' => 'error ' . $th->getMessage()
+                ]);
+            }
+        }
+
+
+        if($type == 'gampay'){
+            Historiquetrans::where('id', $trans)->update([
+                'param5' => $status_operation
+            ]);
+        }else{
+            GamRechargeHist::where('id', $trans)->update([
+                'param4' => $status_operation
             ]);
         }
 
-        Historiquetrans::where('id', $trans)->update([
-            'param5' => $status_operation
-        ]);
         return response()->json($response);
     }
 

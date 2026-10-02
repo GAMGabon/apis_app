@@ -19,14 +19,14 @@ class PaymentController extends Controller
         $summary = $this->createTokenPushAM();
         return $summary;
     }
-    
+
     public function createTokenPushAM()
     {
         // accès prod gampay
         $client_id = "1ff01e5a-78f3-431f-ac06-b01457562650";
         $client_secret = "be0c6692-eaa4-4863-9085-dac8d01cd853";
         $url = "https://openapi.airtel.ga/auth/oauth2/token";
-        
+
         $curl = curl_init();
         curl_setopt_array($curl, array(
             CURLOPT_URL => $url,
@@ -64,16 +64,16 @@ class PaymentController extends Controller
         // Close handle
         curl_close($curl);
     }
-    
+
     public function createTransPushAM($montant, $phone,$object)
     {
 
-        
+
         $tokenPush = "";
         $id = rand(1000, 100000);
         $message = $object;
         $urlCollection = "https://openapi.airtel.ga/merchant/v1/payments/";
-        
+
         $max = 500000;
         $min = 100;
 
@@ -189,19 +189,19 @@ class PaymentController extends Controller
         // Close handle
         curl_close($curl);
     }
-    
+
     public function summaryPushAM()
     {
         // accès prod gampay
         $tokenPush = "";
         $urlSummary = "https://openapi.airtel.ga/merchant/v1/transactions";
-        
+
         $params = [
             "from"   => "",
             "to"     => "",
             "limit" =>10
         ];
-        
+
         $baseUrl = $urlSummary;
         $fullUrl = $baseUrl . '?' . http_build_query($params);
         $token = $this->createTokenPushAM();
@@ -244,7 +244,7 @@ class PaymentController extends Controller
         // Close handle
         curl_close($curl);
     }
-    
+
     public function newCallBackAMOfflineAppRequest(Request $request)
     {
         try {
@@ -351,7 +351,7 @@ class PaymentController extends Controller
                                                     'solde' => $newSolde,
                                                     'depannage' => null
                                                 ]);
-                                                
+
                                                 $trans->update([
                                                     'solde' => $account->solde
                                                 ]);
@@ -448,7 +448,7 @@ class PaymentController extends Controller
             ]);
         }
     }
-    
+
     // Apis airtel money
     public function amPush(Request $request){
         $push = $this->amPushIn($request->phone, $request->montant, $request->object);
@@ -502,9 +502,13 @@ class PaymentController extends Controller
                 $trans = Historiquetrans::where('reference', $dataPost['transaction']['id'])->where('etat', 'attend')->first();
                 if($trans){
                     $trans->update(['etat' => $trans->operation == 'recharge_visa_uba'? 'en_attente' : 'atraiter']);
+                    // Revente d'actions EMOTION : transfert des actions et paiement du vendeur
+                    if($trans->operation == 'achat_action_revente'){
+                        (new VenteActionController())->finaliserDepuisTransaction($trans->fresh());
+                    }
                     $order->update(['treatment' => 'ok']);
                 }
-                
+
                 $account = AssistanceDataCredit::where('ref_recharge', $dataPost['id_trans'])->first();
                 if ($account) {
                     $trans = new Historiquetrans([
@@ -524,17 +528,17 @@ class PaymentController extends Controller
                     ]);
 
                     $trans->save();
-                    
+
                     $newSolde = $account->solde + intval($account->amount_recharge);
                     $account->update([
                         'solde' => $newSolde,
                         'ref_recharge' => null,
-                        'number_charge' => null,
+                        'number_recharge' => null,
                         'amount_recharge' => null
                     ]);
                 }
             }
-            
+
             return 'ok';
         } catch (Exception $th) {
             $data = $request->json;
@@ -556,6 +560,10 @@ class PaymentController extends Controller
                             $trans = Historiquetrans::where('reference', $dataPost['transaction']['id'])->where('etat', 'attend')->first();
                             if($trans){
                                 $trans->update(['etat' => $trans->operation == 'recharge_visa_uba'? 'en_attente' : 'atraiter']);
+                                // Revente d'actions EMOTION : transfert des actions et paiement du vendeur
+                                if($trans->operation == 'achat_action_revente'){
+                                    (new VenteActionController())->finaliserDepuisTransaction($trans->fresh());
+                                }
                                 $order->update(['treatment' => 'ok']);
                             }
                         }
@@ -621,16 +629,16 @@ class PaymentController extends Controller
     public function getInfoCustomerPvit(Request $request){
         return $this->getInfoCustomerPvitIn($request->operateur, $request->phone);
     }
-    
+
      public function getInfoCustomerPvitIn($operateur, $phone){
         $token = $this->getTokenPvit();
         if($token == null){
             return 'error';
         }
-        
+
         $operateurValue = "MOOV_MONEY";
         if($operateur == 'airtel'){
-            $operateurValue = "AIRTEL_MONEY"; 
+            $operateurValue = "AIRTEL_MONEY";
         }
 
         $response = Http::withHeaders([
@@ -680,11 +688,11 @@ class PaymentController extends Controller
             $order->save();
             $response1 = $dataPost['transactionId'];
             $response2 =  $dataPost['code'];
-            
+
             if(str_contains($dataPost['merchantReferenceId'],'wallet') && $dataPost['status'] == 'SUCCESS'){
                $account = AssistanceDataCredit::where('ref_recharge', $dataPost['merchantReferenceId'])->first();
                 if ($account) {
-                    
+
                      $trans = new Historiquetrans([
                         'operation' => 'recharge_wallet',
                         'reference' => $dataPost['merchantReferenceId'],
@@ -702,7 +710,7 @@ class PaymentController extends Controller
                     ]);
 
                     $trans->save();
-                    
+
                     $newSolde = $account->solde + intval($dataPost['amount']);
                     $account->update([
                         'solde' => $newSolde,
@@ -728,7 +736,7 @@ class PaymentController extends Controller
             $order->save();
             $response1 = $dataPost['transactionId'];
             $response2 =  $dataPost['code'];
- 
+
         } finally {
             if($response1 == null){
                 $order = new Pvit([
@@ -737,26 +745,30 @@ class PaymentController extends Controller
                 ]);
                 $order->save();
             }
-           
+
         }
-        
+
         if($response1 != null){
            if($dataPost['status'] == "SUCCESS"){
                 $trans = Historiquetrans::where('reference', $dataPost['merchantReferenceId'])->where('etat', 'attend')->first();
                 if($trans){
                     $trans->update(['etat' => $trans->operation == 'recharge_visa_uba'? 'en_attente' : 'atraiter']);
+                    // Revente d'actions EMOTION : transfert des actions et paiement du vendeur
+                    if($trans->operation == 'achat_action_revente'){
+                        (new VenteActionController())->finaliserDepuisTransaction($trans->fresh());
+                    }
                     $order->update(['treatment' => 'ok']);
                 }
-            } 
+            }
         }
-        
+
         return response()->json([
             'transactionId'=> $response1,
             'responseCode'=> $response2,
         ]);
-       
+
     }
-    
+
     public function chargeWalletWithPush(Request $request){
         try {
             if($request->operateur == 'moov'){
@@ -783,7 +795,7 @@ class PaymentController extends Controller
                     'message'=> 'Une erreur s\'est produite '
                 ]);
             }
-            
+
         }catch (Exception $e){
             return response()->json([
                 'statut'=> false,
