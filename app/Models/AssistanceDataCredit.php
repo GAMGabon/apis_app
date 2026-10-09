@@ -38,7 +38,6 @@ class AssistanceDataCredit extends Model
         'forfait_qte',
         'forfait_qte_recharge',
         'forfait_qte_change',
-        'forfait_last_verify_at',
-        'suivi_sim'
+        'forfait_last_verify_at'
     ];
 }

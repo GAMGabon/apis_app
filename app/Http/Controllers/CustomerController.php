@@ -4140,7 +4140,7 @@ class CustomerController extends Controller
     }
 
     public function countScoreCustomerUssd(){
-
+        
         $trans = DB::select("select * from gamrechargehist h where h.deleted_at is null and port = '6A' and h.etat like '%succes%' and (h.param4 is NULL or (h.param4 !='point' and h.param4 !='point_wallet_charge' and h.param4 !='point_wallet_no_charge')) and id>=109163857 order by id desc limit 5");
         if(count($trans)>0){
             foreach ($trans as $tran){
@@ -4241,7 +4241,7 @@ class CustomerController extends Controller
                 }
                 $amount = intval($tran->montant)-$frais;
                 $qte_data = null;
-                $qte_credit = null;
+                $qte_credit = null; 
                 $agent = new AgentController();
                 if( in_array($tran->montant, ['1200', '2200' , '5200' , '10200'])){
                     switch ($tran->montant){

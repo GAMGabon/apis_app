@@ -63,7 +63,7 @@ Route::get('countScoreCustomerUssd',[\App\Http\Controllers\CustomerController::c
 Route::get('countScoreCustomerUssdRecup',[\App\Http\Controllers\CustomerController::class, 'countScoreCustomerUssdRecup']);// Compte score Recup customer ussd
 Route::get('countScoreCustomerEdan',[\App\Http\Controllers\CustomerController::class, 'countScoreCustomerEdan']);// Compte score customer edan
 
-Route::post('getInfoCustomerSuper',[\App\Http\Controllers\CustomerController::class, 'getInfoCustomerSuper']);// Search customer trans supervision
+Route::post('getInfoCustomerSuper',[\App\Http\Controllers\CustomerController::class, 'getInfoCustomerSuper']);// Search customer trans supervision 
 
 Route::get('getInfocustomerComplement',[\App\Http\Controllers\CustomerController::class, 'getInfocustomerComplement']);// Add info device and region customer
 
@@ -135,21 +135,21 @@ Route::post('callBackAM',[\App\Http\Controllers\HistoriquetransController::class
 Route::post('restartTrans',[\App\Http\Controllers\HistoriquetransController::class, 'restartTrans']);//Relancer les transactions des partenaires
 Route::post('rembourseVisa',[\App\Http\Controllers\HistoriquetransController::class, 'rembourserClientVisa']);//Relancer les transactions des partenaires
 Route::get('remEdan',[\App\Http\Controllers\HistoriquetransController::class, 'remEdan']);//Relancer les transactions des partenaires
-Route::post('rechargeGab',[\App\Http\Controllers\HistoriquetransController::class, 'rechargeGab']);//Recharge by gab
+Route::post('rechargeGab',[\App\Http\Controllers\HistoriquetransController::class, 'rechargeGab']);//Recharge by gab 
 Route::post('storeGabStock',[\App\Http\Controllers\HistoriquetransController::class, 'storeGabStock']);//stock gab customer
 Route::post('cleanGabStock',[\App\Http\Controllers\HistoriquetransController::class, 'cleanGabStock']);// remove stock gab customer
 
-Route::get('orabankGetAcces',[\App\Http\Controllers\HistoriquetransController::class, 'orabankGetAcces']);//token orabank
-Route::post('orderOrabankTest',[\App\Http\Controllers\HistoriquetransController::class, 'orderOrabankTest']);//token orabank
+Route::get('orabankGetAcces',[\App\Http\Controllers\HistoriquetransController::class, 'orabankGetAcces']);//token orabank 
+Route::post('orderOrabankTest',[\App\Http\Controllers\HistoriquetransController::class, 'orderOrabankTest']);//token orabank 
 Route::get('valideVisaOperation',[\App\Http\Controllers\HistoriquetransController::class, 'valideVisaOperation']);//  TRANS BY VISA ORABANK
 
 
-Route::get('recupTransVisa',[\App\Http\Controllers\HistoriquetransController::class, 'recupTransVisa']);//service
-Route::post('transPartenaire',[\App\Http\Controllers\HistoriquetransController::class, 'transPartenaire']);//suivi partenaires
+Route::get('recupTransVisa',[\App\Http\Controllers\HistoriquetransController::class, 'recupTransVisa']);//service 
+Route::post('transPartenaire',[\App\Http\Controllers\HistoriquetransController::class, 'transPartenaire']);//suivi partenaires 
 Route::post('recupGain',[\App\Http\Controllers\HistoriquetransController::class, 'recupGain']);
 
 Route::post('rechargeCard',[\App\Http\Controllers\HistoriquetransController::class, 'rechargeCard']);
-Route::post('allTransBfm',[\App\Http\Controllers\HistoriquetransController::class, 'allTransBfm']);// recup bfm
+Route::post('allTransBfm',[\App\Http\Controllers\HistoriquetransController::class, 'allTransBfm']);// recup bfm 
 Route::post('getMyBfm',[\App\Http\Controllers\HistoriquetransController::class, 'getMyBfm']);// recup bfm
 Route::post('updateRia',[\App\Http\Controllers\HistoriquetransController::class,'updateRia']);
 Route::post('createTransCadeau',[\App\Http\Controllers\HistoriquetransController::class, 'createTransCadeau']);//creer la transaction cadeau
@@ -252,7 +252,7 @@ Route::post('insertFailAttempt',[\App\Http\Controllers\ServicesController::class
 Route::get('storeTokenOrabank',[\App\Http\Controllers\ServicesController::class, 'storeTokenOrabank']);// créer un token
 Route::post('storePaymentMode',[\App\Http\Controllers\ServicesController::class, 'storePaymentMode']);// Add Paiement Mode
 Route::post('storeErrorApp',[\App\Http\Controllers\ServicesController::class, 'storeErrorApp']);// Save error app
-Route::get('disableOrabank',[\App\Http\Controllers\ServicesController::class, 'disableOrabank']);// Disable Orabank card
+Route::get('disableOrabank',[\App\Http\Controllers\ServicesController::class, 'disableOrabank']);// Disable Orabank card 
 
 Route::post('recupAndDisableCustomerParrainage',[\App\Http\Controllers\ServicesController::class, 'recupAndDisableCustomerParrainage']);
 Route::post('recupAndAccumulationGainParrainage',[\App\Http\Controllers\ServicesController::class, 'recupAndAccumulationGainParrainage']);
@@ -309,7 +309,7 @@ Route::get('whatsappRmRepay', [\App\Http\Controllers\ServicesController::class, 
 Route::get('rembourseRmwhatsappLoading', [\App\Http\Controllers\ServicesController::class, 'rembourseRmwhatsappLoading']);
 Route::get('rmWhatsappHelpCustomer',[\App\Http\Controllers\ServicesController::class, 'rmWhatsappHelpCustomer']);
 
-// IP script
+// IP script 
 Route::get('getContryIp',[\App\Http\Controllers\ServicesController::class, 'getContryIp']);
 Route::get('getContryIpTest',[\App\Http\Controllers\HistoriquetransController::class, 'getContryIpTest']);
 
@@ -331,20 +331,12 @@ Route::post('sendTemplateAssist1xbet',[\App\Http\Controllers\ServicesController:
 
 Route::get('getTransTestInterne',[\App\Http\Controllers\ServicesController::class, 'getTransTestInterne']);
 Route::post('getTransTestInterne',[\App\Http\Controllers\ServicesController::class, 'getTransTestInterne']);
+/******************************* Emotion Action **************************************/
 
 Route::get('getCustomerAction',[\App\Http\Controllers\ServicesController::class, 'getCustomerAction']);
 Route::post('getCustomerAction',[\App\Http\Controllers\ServicesController::class, 'getCustomerAction']);
 
-/*************** Revente d'actions EMOTION **************/
-Route::post('getMesActionsVendables',[\App\Http\Controllers\VenteActionController::class, 'getMesActionsVendables']);
-Route::post('mettreActionsEnVente',[\App\Http\Controllers\VenteActionController::class, 'mettreActionsEnVente']);
-Route::post('annulerVenteAction',[\App\Http\Controllers\VenteActionController::class, 'annulerVenteAction']);
-Route::post('getActionsEnVente',[\App\Http\Controllers\VenteActionController::class, 'getActionsEnVente']);
-Route::post('reserverAchatAction',[\App\Http\Controllers\VenteActionController::class, 'reserverAchatAction']);
-Route::post('annulerReservationAction',[\App\Http\Controllers\VenteActionController::class, 'annulerReservationAction']);
-Route::post('validerAchatActionRevente',[\App\Http\Controllers\VenteActionController::class, 'validerAchatActionRevente']);
-Route::get('traiterAchatsRevente',[\App\Http\Controllers\VenteActionController::class, 'traiterAchatsRevente']);
-Route::post('traiterAchatsRevente',[\App\Http\Controllers\VenteActionController::class, 'traiterAchatsRevente']);
+ /******************************* Fin emotion Action **************************************/
 
 Route::get('getForfaitDataCredit',[\App\Http\Controllers\ServicesController::class, 'getForfaitDataCredit']);
 Route::post('getForfaitDataCredit',[\App\Http\Controllers\ServicesController::class, 'getForfaitDataCredit']);
@@ -381,7 +373,7 @@ Route::post('becomStudent',[\App\Http\Controllers\ChallengeContoller::class, 'be
 Route::post('removeStudent',[\App\Http\Controllers\ChallengeContoller::class, 'removeStudent']);
 Route::get('compteVueAuto',[\App\Http\Controllers\ChallengeContoller::class, 'compteVueAuto']);
 Route::get('getTransCaisse',[\App\Http\Controllers\ChallengeContoller::class, 'getTransCaisse']);
-Route::get('recupClientsHotesses',[\App\Http\Controllers\ChallengeContoller::class, 'recupClientsHotesses']);//recupérer les clients pour les hotesse
+Route::get('recupClientsHotesses',[\App\Http\Controllers\ChallengeContoller::class, 'recupClientsHotesses']);//recupérer les clients pour les hotesse 
 Route::get('removeCodeConfirmPrixImport',[\App\Http\Controllers\ChallengeContoller::class, 'removeCodeConfirmPrixImport']); // Vider le code_confirm des inactif
 
 Route::get('getCustomerPrixImportSecondChallenge',[\App\Http\Controllers\ChallengeContoller::class, 'getCustomerPrixImportSecondChallenge']);
@@ -508,7 +500,7 @@ Route::get('sendAlertEnchere',[\App\Http\Controllers\ScriptController::class, 's
 /****** Fin Lancement communication ussd *******/
 
 
-/*************** route gamview ***************/
+ /*************** route gamview ***************/
 Route::get('sendWhatsappGamView',[\App\Http\Controllers\CustomerController::class, 'sendWhatsappGamView']);
 Route::post('sendWhatsappGamView',[\App\Http\Controllers\CustomerController::class, 'sendWhatsappGamView']);
 Route::post('sendWhatsappGamViewShare',[\App\Http\Controllers\CustomerController::class, 'sendWhatsappGamViewShare']);
@@ -652,18 +644,19 @@ Route::post('rechargeWallet',[\App\Http\Controllers\AgentController::class, 'rec
 Route::get('udateCallTimeOnline',[\App\Http\Controllers\AgentController::class, 'udateCallTimeOnline']);
 Route::post('udateCallTimeOnline',[\App\Http\Controllers\AgentController::class, 'udateCallTimeOnline']);
 
-Route::get('udateSimsOnline',[\App\Http\Controllers\AgentController::class, 'udateSimsOnline']);
-Route::post('udateSimsOnline',[\App\Http\Controllers\AgentController::class, 'udateSimsOnline']);
-
 Route::get('calculTimeCallUssd',[\App\Http\Controllers\AgentController::class, 'calculTimeCallUssd']);
 Route::post('calculTimeCallUssd',[\App\Http\Controllers\AgentController::class, 'calculTimeCallUssd']);
-
 
 Route::get('rechargeCallTimeOrData',[\App\Http\Controllers\AgentController::class, 'rechargeCallTimeOrData']);
 Route::post('rechargeCallTimeOrData',[\App\Http\Controllers\AgentController::class, 'rechargeCallTimeOrData']);
 
+Route::get('udateSimsOnline',[\App\Http\Controllers\AgentController::class, 'udateSimsOnline']);
+Route::post('udateSimsOnline',[\App\Http\Controllers\AgentController::class, 'udateSimsOnline']);
+
 Route::post('dataAssistance',[\App\Http\Controllers\AgentController::class, 'dataAssistance']);
 Route::post('creditAssistance',[\App\Http\Controllers\AgentController::class, 'creditAssistance']);
+Route::post('achatDirectOffre',[\App\Http\Controllers\AgentController::class, 'achatDirectOffre']);// achat direct d'une offre (paiement Mobile Money)
+
 /********************************************************************************** End AgentController Controller route **************************************************************************************/
 
 
@@ -679,4 +672,15 @@ Route::get('calculPointsStore',[\App\Http\Controllers\ProgressionController::cla
 
 
 /********************************************************************************** End Progression Controller route **************************************************************************************/
+
+/*************** Revente d'actions EMOTION **************/
+Route::post('getMesActionsVendables',[\App\Http\Controllers\VenteActionController::class, 'getMesActionsVendables']);
+Route::post('mettreActionsEnVente',[\App\Http\Controllers\VenteActionController::class, 'mettreActionsEnVente']);
+Route::post('annulerVenteAction',[\App\Http\Controllers\VenteActionController::class, 'annulerVenteAction']);
+Route::post('getActionsEnVente',[\App\Http\Controllers\VenteActionController::class, 'getActionsEnVente']);
+Route::post('reserverAchatAction',[\App\Http\Controllers\VenteActionController::class, 'reserverAchatAction']);
+Route::post('annulerReservationAction',[\App\Http\Controllers\VenteActionController::class, 'annulerReservationAction']);
+Route::post('validerAchatActionRevente',[\App\Http\Controllers\VenteActionController::class, 'validerAchatActionRevente']);
+Route::get('traiterAchatsRevente',[\App\Http\Controllers\VenteActionController::class, 'traiterAchatsRevente']);
+Route::post('traiterAchatsRevente',[\App\Http\Controllers\VenteActionController::class, 'traiterAchatsRevente']);
 

@@ -218,12 +218,6 @@ class TransactionsController
                 'solde' => strval($newSolde)
             ]);
 
-            // Revente d'actions EMOTION payée par solde GamPay : finalisation immédiate
-            if($trans->operation == 'achat_action_revente' && in_array($trans->etat, VenteActionController::ETATS_PAYES)){
-                (new VenteActionController())->finaliserDepuisTransaction($trans);
-                $trans = $trans->fresh();
-            }
-
             return response()->json([
                 'statut'=> true,
                 'body'=> $trans,

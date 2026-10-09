@@ -106,7 +106,7 @@ class Customer extends Model
         'challenge',
         'my_device',
         'last_transaction_at',
-        'last_transaction_amount', 
+        'last_transaction_amount',
         'last_transaction_operation',
         'suivi',
         'city',
@@ -192,6 +192,10 @@ class Customer extends Model
 
     public function complement(){
         return $this->belongsTo(CustimerComplement::class, 'phoneclient','phoneclient');
+    }
+
+    public function sims() {
+        return $this->hasMany(ConfigSim::class, 'customer_id','id')->orderBy('id', 'desc');
     }
 
 

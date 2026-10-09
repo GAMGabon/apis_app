@@ -39,22 +39,22 @@ use Infobip\Model\SmsTextualMessage;
 
 class ScriptController extends Controller
 {
-    /* Customer Sleeping with pay */
-
+    /* Customer Sleeping with pay */ 
+    
     public function sendTemplateForCustomerUssdSleepingWithPay($segmentation)
     {
         //$segmentation == 'in_customer_and_have_solde'
-       $customers = DB::select("SELECT * from client2 where post_Balance is not NULL and transaction_ID is NULL limit 30");
+       $customers = DB::select("SELECT * from client2 where post_Balance is not NULL and transaction_ID is NULL limit 30"); 
        if(count($customers)>0){
            foreach($customers as $customer){
                $now = date('Y-m-d');
                $messageId = 'communication_for_sleeping_customer_with_pay_start_' . $customer->num . '_' . time();
                $msg2 = "Cher client, en raison de vos transactions d'achat de crÃ©dit non abouties, GAM double votre compte de remboursement de frais et les 100 Fcfa de frais habituellement prÃ©levÃ©s vous seront automatiquement remboursÃ©sðŸ˜Ž. Alors, nâ€™attendez plus, profitez de cette opportunitÃ© dÃ¨s maintenant ðŸ¥³!";
 
-
+               
                $check1 = $this->checkNumWhatsapp('241' . substr($customer->numclient, 1));
                $check2 = $this->checkNumWhatsapp('241' . $customer->numexpediteur);
-
+               
                if ($check1 == 'success') {
                     $status = 'WH';
                     $goodWhatsapp = '241' . substr($customer->numclient, 1);
@@ -66,7 +66,7 @@ class ScriptController extends Controller
                      $goodWhatsapp = '241' . $customer->numexpediteur;
                     $this->templateForCustomerUssdSleepingVideoWithPay('241' . $customer->numexpediteur, $msg2, 'https://gampay.org/audio_flow/videoaudio_sleeping_ussd_with_pay_jour.MP4', $messageId);
                 }
-
+                
                 if ($check1 != 'success' && $check2 != 'success') {
                     $statut = 'false';
                     Client2::where('num', $customer->num)->update([
@@ -88,9 +88,9 @@ class ScriptController extends Controller
            }
        }
     }
-
+    
     //Template Customer Sleeping with pay
-
+    
     public function templateForCustomerUssdSleepingVideoWithPay($whatsapp, $message, $video, $messageId)
     {
         $curl = curl_init();
@@ -158,13 +158,13 @@ class ScriptController extends Controller
         // Close handle 24104071340 24102621171
         curl_close($curl);
     }
-
-    /* End Customer Sleeping with pay */
-
+    
+    /* End Customer Sleeping with pay */ 
+    
     /* Remboursement Customer Sleeping with pay ussd */
-
+    
     //script remboursement Customer Sleeping with pay ussd
-
+    
     public function remboursementOfFraisForCustomerSleepingWithPay(Request $request)
     {
         $customer = Client2::where('numclient', $request->phone)->where('service_Type','remboursement')->first();
@@ -216,11 +216,11 @@ class ScriptController extends Controller
                     ]);
                 }
             }
-        } // service_Type = 'endormi' and previous_Balance is not null and post_Balance is NULL
+        } // service_Type = 'endormi' and previous_Balance is not null and post_Balance is NULL 
     }
-
+    
     // Template remboursement Customer Sleeping with pay ussd
-
+    
     public function templateRecapForCustomerWithPay($whatsapp, $message, $image, $messageId)
     {
         $curl = curl_init();
@@ -286,7 +286,7 @@ class ScriptController extends Controller
         // Close handle 24104071340 24102621171
         curl_close($curl);
     }
-
+    
     /* Fin Remboursement Customer Sleeping with pay ussd */
 
     /* Customer new ussd */
@@ -297,7 +297,7 @@ class ScriptController extends Controller
         $client2 = Client2::where('numclient', $request->phone)->first();
 
         if($client2){
-
+            
         if (intval($client2->grade) == 100) {
             $montant = 80;
         } else {
@@ -307,7 +307,7 @@ class ScriptController extends Controller
         $messageId = 'new_communication_ussd_image' . time();
         $message1 = "Cher client, Bienvenue chez Gam !🥳 Vous venez d'envoyer $montant Fcfa de crédit au 0$client2->numexpediteur. Vous faites désormais partie d’une communauté où simplicité et efficacité sont au rendez-vous. ☺ Pour découvrir encore plus de services pratiques. Avec GamPay, tout devient plus facile !  Suivez-nous sur notre chaîne WhatsApp 👉🏽: https://whatsapp.com/channel/0029Va8AVWF05MUWbo2zbk3c";
         $message2 = "Cher client, Bienvenue chez Gam !🥳 Vous venez de recevoir $montant Fcfa de crédit du $request->phone. Vous faites désormais partie d’une communauté où simplicité et efficacité sont au rendez-vous. ☺ Pour découvrir encore plus de services pratiques. Avec GamPay, tout devient plus facile !  Suivez-nous sur notre chaîne WhatsApp 👉🏽: https://whatsapp.com/channel/0029Va8AVWF05MUWbo2zbk3c";
-
+       
         $check1 = $this->checkNumWhatsapp('241' . substr($request->phone, 1));
         $check2 = $this->checkNumWhatsapp('241' . $client2->numexpediteur);
 
@@ -321,12 +321,12 @@ class ScriptController extends Controller
             $status = 'WH_L';
             $goodWhatsapp = '241' . $client2->numexpediteur;
             $this->newTemplateForCustomerUSSD($goodWhatsapp, $message2,'https://gampay.org/image_flow/affiche_communication.jpeg',$messageId);
-        }
+        } 
             Client2::where('num', $client2->num)->update([
                 'whatsapp' => $goodWhatsapp,
                 'status' => $status
             ]);
-
+            
         $customer = Customer::where('phoneclient', $request->phone)->first();
         if ($customer) {
             $option = 'ussd';
@@ -445,7 +445,7 @@ class ScriptController extends Controller
          //$send = $this->sendTemplateForCustomerUssdSleepingWithPay('in_customer_and_have_solde');
          //$send1 = $this->sendTemplateForCustomerUssdSleeping('');
          //$this->takeCustomerClient2ForVerifWhatsapp();
-
+            
         if(!empty($request->appli)){
             $whatsapp = substr($request->whatsapp,4);
             $customer = WhatsAppBackUp::where('messageId', 'like', 'communication_enchere_image%')->where('recipeint', 'like', '%'. $whatsapp.'%')->first();
@@ -456,11 +456,11 @@ class ScriptController extends Controller
             }
             $message = "Le client *$request->whatsapp* pour les enchères a commencé la procédure d'installation";
             Http::get("https://gampay.org/gamclients/public/api/sendWhatsappMessageInGroupWaAPIRequest?service=service_client&message=".$message);
-        }
+        } 
     }
 
     /* Fin lancement communication ussd */
-
+    
      public function getNumByWhatsApp($whatsapp){
         $phoneSansIndicatif = substr($whatsapp, 3);
         $debuNum = $phoneSansIndicatif[0].''.$phoneSansIndicatif[1];
@@ -487,32 +487,32 @@ class ScriptController extends Controller
         }
         return $phone;
     }
-
-
-    // Template com
+    
+    
+    // Template com 
     public function shareCom(Request $request) {
         $typeFile = 'image';
         $message = 'Decouvrez les produits et services de GAM';
         $templateName = 'com_sharecom_image';
         $file = 'https://gampay.org/image_flow/accueil_flow_white.png';
-
+        
         if(!empty($request->typeFile)){
             $typeFile = $request->typeFile;
             $file = $request->file;
         }
-
+        
         if(!empty($request->message)){
             $message = $request->message;
         }
-
+        
         $request->typeFile == 'image';
         $templateName = 'com_sharecom_image';
         if ($request->typeFile == 'video') {
           $templateName = 'com_sharecom_video';
         }
-
+    
         $phone = $this->getNumByWhatsApp($request->whatsapp);
-
+    
         $curl = curl_init();
         curl_setopt_array($curl, array(
           CURLOPT_URL => 'https://graph.facebook.com/v24.0/908295725690586/messages',
@@ -589,7 +589,7 @@ class ScriptController extends Controller
             'Accept: application/json'
           ),
         ));
-
+    
         $result = curl_exec($curl);
         // Close handle
         if (!curl_errno($curl)) {
@@ -598,7 +598,7 @@ class ScriptController extends Controller
             $response = json_decode($result, true);
             if ($response['messages'][0]['message_status'] == 'accepted') {
               Http::get("https://gampay.org/clients/public/api/createAccount?phone=$phone&parrain=$request->parrain&whatsapp=$request->whatsapp&option=shareCom");
-
+    
               return response()->json([
                 'statut' => true,
                 'body' => $response['messages'][0]['id']
@@ -624,9 +624,9 @@ class ScriptController extends Controller
         // Close handle
         curl_close($curl);
     }
-
+    
     /* script wifi */
-
+    
     public function sendTemplateInCustomer($phone, $message)
     {
         $customer = Customer::where('phoneclient', $phone)->first();
@@ -673,7 +673,7 @@ class ScriptController extends Controller
                                     ]);
                                     $registerTicket->save();
                                 }
-
+                                
                                 $customerWifi = CustomerWifi::where('phone', $customer->phoneclient)->first();
                                 if($customerWifi){
                                     if($customerWifi->end_subscription <= date("Y-m-d") && $customerWifi->end_ticket >= date("Y-m-d")){
@@ -833,7 +833,7 @@ class ScriptController extends Controller
         }
         return 0;
     }
-
+    
     public function createTransWifi(Request $request)
     {
         //Http::get("https://gampay.org/clients/public/api/createTransWifi?montant=$request->montant");
@@ -849,7 +849,7 @@ class ScriptController extends Controller
 
         return redirect("tel:" . $url . "%23");
     }
-
+    
     public function templateMessageCustomerWifiPlanFlow($whatsapp, $messageId,$message)
   {
     $phone = $this->getNumByWhatsApp($whatsapp);
@@ -914,7 +914,7 @@ class ScriptController extends Controller
     // Close handle
     curl_close($curl);
   }
-
+  
   public function solveOperationRechargeVisa()
     {
         try {
@@ -948,19 +948,19 @@ class ScriptController extends Controller
             return null;
         }
     }
-
+    
     public function getTransTestInterne(){
         $trans = DB::select("SELECT id, operation, numclient as num_receveur, phonevendeur as num_emeteur, content as operateur, montant as montant_a_payer FROM historiquetrans g where phonevendeur = '074201507' and operation in ('data_credit','achat_credit') order by id desc limit 1");
         return $trans;
     }
-
+    
     public function getCustomerAction(Request $request){
         try{
             $customer = ProjetAction::where('projet_action',13)->get();
             if($request->option == 'my_action'){
                 $customer = ProjetAction::where('customer',$request->id)->get();
             }
-
+            
             return response()->json([
                 'statut' => true,
                 'body' => $customer
@@ -969,6 +969,4 @@ class ScriptController extends Controller
             //throw $th;
         }
     }
-
-
 }

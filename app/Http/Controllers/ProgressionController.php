@@ -27,9 +27,14 @@ class ProgressionController extends Controller
                 $states = json_decode($custom->states, true);
 
                 if (array_key_exists($product, $states)) {
-                    $states[$product]++;
-                } else {
-                    $states[$product] = 1;
+                    //$states[$product]++;
+                    if ($product === 'pack') {
+                        $states[$product] += 2;
+                    } else {
+                        $states[$product] += 1;
+                    }
+                }elseif($product === 'pack'){
+                    $states[$product] = 2;
                 }
 
                 $custom->update([

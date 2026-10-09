@@ -4318,6 +4318,7 @@ Frais 1xbet : $fraisBet
         return $trans;
     }
     
+    /******************************* Emotion Action **************************************/
     public function getCustomerAction(Request $request){
         try{
             $customer = ProjetAction::where('projet_action',13)->orderby('id', 'desc')->get();
@@ -4336,6 +4337,7 @@ Frais 1xbet : $fraisBet
               ]);
         }
     }
+    /******************************* Fin emotion Action **************************************/
     
     public function getForfaitDataCredit(Request $request)
     {

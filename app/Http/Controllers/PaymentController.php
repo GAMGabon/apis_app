@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Historiquetrans;
 use App\Models\OrderPushAM;
 use App\Models\Customer;
+use App\Models\ConfigSim;
 use App\Models\DetatilsOperation;
 use App\Models\Pvit;
 use Illuminate\Http\Request;
@@ -245,6 +246,132 @@ class PaymentController extends Controller
         curl_close($curl);
     }
 
+    /**
+     * Achat hors connexion payé par Airtel Money (USSD). Le dernier chiffre
+     * du montant indique l'achat et la SIM à ravitailler :
+     *   1 / 2 : temps d'appel vers la SIM du slot 1 / 2
+     *           (forfait "Appels" du montant, sinon crédit simple
+     *           frais déduits : 500 payés -> 400 de crédit)
+     *   3 / 4 : forfait internet vers la SIM du slot 1 / 2
+     *   (9 = recharge wallet, traitée à part)
+     * La SIM est retrouvée dans config_sims, l'offre dans
+     * forfait_data_credit (operateur_credit de la SIM + montant).
+     * Si la SIM ou l'offre est introuvable, le montant est crédité au
+     * wallet : le client ne perd pas son argent.
+     */
+    private function achatHorsConnexion($customer, $item, $airtelId, $code, $anciennesSims)
+    {
+        $montantPaye = intval($item['transaction']['amount']);
+        $base = $montantPaye - $code; // prix de l'offre (+ frais du crédit)
+        $internet = in_array($code, [3, 4]);
+        $slot = in_array($code, [1, 3]) ? 0 : 1;
+
+        // 1. SIM du slot : table config_sims, sinon ancienne config
+        $numclient = null;
+        $opSim = null;
+        $sim = $customer->sims->firstWhere('slot', $slot);
+        if ($sim) {
+            $numclient = strval($sim->number);
+            $opSim = $sim->operateur_credit ?: $sim->operateur;
+        } else {
+            foreach ((is_array($anciennesSims) ? $anciennesSims : []) as $s) {
+                if (strval($s['slot'] ?? '') == strval($slot)) {
+                    $numclient = strval($s['number'] ?? '');
+                    $opSim = $s['operateur_credit'] ?? ($s['operateur'] ?? null);
+                }
+            }
+        }
+        $opSim = strtolower(strval($opSim));
+        $operateur = null;
+        if (str_contains($opSim, 'airtel')) {
+            $operateur = 'AIRTEL_GA';
+        } else if (str_contains($opSim, 'moov') || str_contains($opSim, 'libertis')) {
+            $operateur = 'LIBERTIS';
+        }
+
+        // 2. Offre achetée
+        $forfait = null;
+        $operation = 'data_credit';
+        $prix = $base;
+        $frais = 0;
+        if ($numclient && $operateur) {
+            $forfait = ForfaitDataCredit::where('name', $internet ? 'Forfait' : 'Appels')
+                ->where('operateur', $operateur == 'AIRTEL_GA' ? 'airtel' : 'moov')
+                ->whereRaw('CAST(price AS UNSIGNED) = ?', [$base])
+                ->orderBy('updated_at', 'desc')
+                ->first();
+            if (!$forfait && !$internet) {
+                // Aucune offre de ce montant pour cet opérateur : achat de
+                // crédit simple, frais déduits du montant payé
+                // (ex. 500 -> 400 de crédit ; 20 F de frais sous 200 F)
+                $operation = 'achat_credit';
+                $frais = $base >= 200 ? 100 : 20;
+                $prix = $base - $frais;
+            }
+        }
+
+        // SIM ou offre introuvable : le montant va au wallet
+        if (!$numclient || !$operateur || ($internet && !$forfait) || $prix <= 0) {
+            $trans = new Historiquetrans([
+                'param6' => $airtelId,
+                'operation' => 'recharge_wallet',
+                'reference' => $airtelId,
+                'etat' => 'atraiter',
+                'numclient' => $numclient,
+                'phonevendeur' => $customer->phoneclient,
+                'content' => $operateur ?? 'AIRTEL_GA',
+                'montant' => $montantPaye,
+                'montant_sans_frais' => $montantPaye,
+                'frais' => 0,
+                'solde' => $customer->solde,
+                'origine_operation' => 'summary_offline',
+                'id_customer' => $customer->id
+            ]);
+            $trans->save();
+            $account = AssistanceDataCredit::where('customer_id', $customer->id)->first();
+            if ($trans->id && $account) {
+                $account->update([
+                    'solde' => $account->solde + $montantPaye,
+                    'depannage' => null
+                ]);
+                $trans->update(['solde' => $account->solde]);
+            }
+            return;
+        }
+
+        // 3. Opération à traiter (le wallet n'est ni crédité ni débité)
+        $trans = new Historiquetrans([
+            'param6' => $airtelId,
+            'operation' => $operation,
+            'reference' => $airtelId,
+            'etat' => 'atraiter',
+            'numclient' => $numclient,
+            'phonevendeur' => $customer->phoneclient,
+            'content' => $operateur,
+            'montant' => strval($montantPaye),
+            'montant_sans_frais' => strval($prix),
+            'frais' => strval($frais),
+            'solde' => '0',
+            'origine_operation' => 'summary_offline',
+            'id_customer' => $customer->id
+        ]);
+        $trans->save();
+        if (!$trans->id) {
+            return;
+        }
+
+        $agent = new AgentController();
+        [$qteCallTime, $qteForfait, $ticketWifi] = $forfait
+            ? $agent->creerDetailsOffre($forfait, $trans, $numclient, $operateur, $airtelId)
+            : $agent->creerDetailCredit($trans, $numclient, $operateur, $airtelId, $prix);
+        $trans->update([
+            'param8' => $qteCallTime,
+            'param9' => $qteForfait,
+        ]);
+        // L'opération apparaît dans la conversation du client
+        $agent->assistancePartyFirebase($customer, $trans, $operation, $ticketWifi);
+    }
+
     public function newCallBackAMOfflineAppRequest(Request $request)
     {
         try {
@@ -256,13 +383,10 @@ class PaymentController extends Controller
                 foreach ($data['data']['transactions'] as $item) {
 
                     try {
-
                         $airtelId = $item['transaction']['airtel_money_id'] ?? '';
                         // 1. Filtrer uniquement ceux qui commencent par MP2
                         //return $airtelId;
                         if (str_starts_with($airtelId, 'MP2') && $item['transaction']['status'] == 'TS' && $item['transaction']['id'] == null) {
-
-
                             // 2. Vérifier si l'ID existe déjà en base
                             $alreadyExists = Historiquetrans::where('param6', $airtelId)->get();
                             if (count($alreadyExists) == 0) {
@@ -270,7 +394,15 @@ class PaymentController extends Controller
                                 $nowDate = date("Y-m-d", $item['transaction']['created_at']);
                                 $numclient = null;
                                 //$date = date("Y-m-d H:", strtotime("$nowDate - 1 hour"));
-                                $customer = Customer::where('payments', 'like', "%{$item['payee']['msisdn']}%")->orWhere('config_sims', 'like', "%{$item['payee']['msisdn']}%")->first();
+                                $msisdn = (string) $item['payee']['msisdn'];
+                                $variantes = ConfigSim::variantesNumero($msisdn);
+                                $customer = Customer::whereIn('phoneclient', $variantes)
+                                    ->orWhereHas('sims', function ($q) use ($variantes) {
+                                        $q->whereIn('number', $variantes);
+                                    })
+                                    ->orWhere('payments', 'like', "%{$msisdn}%")
+                                    ->orWhere('config_sims', 'like', "%{$msisdn}%")
+                                    ->first();
                                 if ($customer) {
                                     $newData = json_decode($customer->config_sims, true);
                                     $slotRecherche = substr((string)intval($item['transaction']['amount']), -1);
@@ -281,11 +413,26 @@ class PaymentController extends Controller
                                     $slot = 0;
                                     $montant = intval($item['transaction']['amount']);
                                     if (!in_array($slotRecherche, ['1', '2', '3', '4', '5', '6', '7', '8', '9'])) {
-                                        $trans = Historiquetrans::where('phonevendeur', $customer->phoneclient)->where('montant', intval($item['transaction']['amount']))->where('etat', 'attend')->where('created_at', 'like', "$nowDate%")->orderBy('id', 'desc')->first();
+                                        // Seule une opération créée AVANT ce paiement (30 min max)
+                                        // peut être payée par lui. Sinon, un ancien paiement du
+                                        // même montant resté sans opération passait à "atraiter"
+                                        // une nouvelle opération que le client n'avait pas payée.
+                                        $datePaiement = intval($item['transaction']['created_at']);
+                                        if ($datePaiement > 100000000000) {
+                                            $datePaiement = intval($datePaiement / 1000); // millisecondes
+                                        }
+                                        $trans = Historiquetrans::where('phonevendeur', $customer->phoneclient)
+                                            ->where('montant', intval($item['transaction']['amount']))
+                                            ->where('etat', 'attend')
+                                            ->where('created_at', '>=', date("Y-m-d H:i:s", $datePaiement - 30 * 60))
+                                            ->where('created_at', '<=', date("Y-m-d H:i:s", $datePaiement + 2 * 60))
+                                            ->orderBy('id', 'desc')
+                                            ->first();
                                         if ($trans) {
                                             $trans->update([
-                                                'etat' => $trans->operation == 'recharge_visa_uba' ? 'en_attente' : 'atraiter',
-                                                'param6' => $airtelId
+                                                'param6' => $airtelId,
+                                                'etat' => $trans->operation == 'recharge_visa_uba' ? 'en_attente' : 'atraiter'
+
                                             ]);
                                             $otherTrans = DetatilsOperation::where('transaction_id', $trans->id)->get();
                                             if (count($otherTrans) > 0) {
@@ -296,6 +443,10 @@ class PaymentController extends Controller
                                                 }
                                             }
                                         }
+                                    } else if (in_array($slotRecherche, ['1', '2', '3', '4'])) {
+                                        // Achat hors connexion : temps d'appel (1, 2)
+                                        // ou forfait (3, 4) vers la SIM du slot 1 / 2
+                                        $this->achatHorsConnexion($customer, $item, $airtelId, intval($slotRecherche), $newData);
                                     } else {
                                         //définition de l'opérateur
                                         if (intval($slotRecherche) % 2 != 0) {
@@ -320,13 +471,22 @@ class PaymentController extends Controller
                                             }
                                         }
 
-                                        for ($i = 0; $i < count($newData); $i++) {
-                                            if (strval($newData[$i]['slot']) == strval($slot)) {
-                                                $numclient = strval($newData[$i]['number']);
+                                        // Numéro de la SIM du slot : table config_sims d'abord,
+                                        // sinon l'ancienne config (customer.config_sims). Avant :
+                                        // count(null) plantait (PHP 8) quand config_sims était vide.
+                                        $simSlot = $customer->sims->firstWhere('slot', intval($slot));
+                                        if ($simSlot) {
+                                            $numclient = strval($simSlot->number);
+                                        } else {
+                                            foreach ((is_array($newData) ? $newData : []) as $simConfig) {
+                                                if (strval($simConfig['slot'] ?? '') == strval($slot)) {
+                                                    $numclient = strval($simConfig['number'] ?? '');
+                                                }
                                             }
                                         }
 
                                         $trans = new Historiquetrans([
+                                            'param6' => $airtelId,
                                             'operation' => $operation,
                                             'reference' => $airtelId,
                                             'etat' => 'atraiter',
@@ -338,8 +498,7 @@ class PaymentController extends Controller
                                             'frais' => $frais,
                                             'solde' => $customer->solde,
                                             'origine_operation' => 'summary_offline',
-                                            'id_customer' => $customer->id,
-                                            'param6' => $airtelId
+                                            'id_customer' => $customer->id
                                         ]);
 
                                         $trans->save();
@@ -502,14 +661,12 @@ class PaymentController extends Controller
                 $trans = Historiquetrans::where('reference', $dataPost['transaction']['id'])->where('etat', 'attend')->first();
                 if($trans){
                     $trans->update(['etat' => $trans->operation == 'recharge_visa_uba'? 'en_attente' : 'atraiter']);
-                    // Revente d'actions EMOTION : transfert des actions et paiement du vendeur
-                    if($trans->operation == 'achat_action_revente'){
-                        (new VenteActionController())->finaliserDepuisTransaction($trans->fresh());
-                    }
                     $order->update(['treatment' => 'ok']);
                 }
 
-                $account = AssistanceDataCredit::where('ref_recharge', $dataPost['id_trans'])->first();
+                // Référence du push = identifiant de la transaction Airtel
+                // (avant : $dataPost['id_trans'], clé inexistante)
+                $account = AssistanceDataCredit::where('ref_recharge', $dataPost['transaction']['id'])->first();
                 if ($account) {
                     $trans = new Historiquetrans([
                         'operation' => 'recharge_wallet',
@@ -560,10 +717,6 @@ class PaymentController extends Controller
                             $trans = Historiquetrans::where('reference', $dataPost['transaction']['id'])->where('etat', 'attend')->first();
                             if($trans){
                                 $trans->update(['etat' => $trans->operation == 'recharge_visa_uba'? 'en_attente' : 'atraiter']);
-                                // Revente d'actions EMOTION : transfert des actions et paiement du vendeur
-                                if($trans->operation == 'achat_action_revente'){
-                                    (new VenteActionController())->finaliserDepuisTransaction($trans->fresh());
-                                }
                                 $order->update(['treatment' => 'ok']);
                             }
                         }
@@ -630,7 +783,7 @@ class PaymentController extends Controller
         return $this->getInfoCustomerPvitIn($request->operateur, $request->phone);
     }
 
-     public function getInfoCustomerPvitIn($operateur, $phone){
+    public function getInfoCustomerPvitIn($operateur, $phone){
         $token = $this->getTokenPvit();
         if($token == null){
             return 'error';
@@ -690,10 +843,10 @@ class PaymentController extends Controller
             $response2 =  $dataPost['code'];
 
             if(str_contains($dataPost['merchantReferenceId'],'wallet') && $dataPost['status'] == 'SUCCESS'){
-               $account = AssistanceDataCredit::where('ref_recharge', $dataPost['merchantReferenceId'])->first();
+                $account = AssistanceDataCredit::where('ref_recharge', $dataPost['merchantReferenceId'])->first();
                 if ($account) {
 
-                     $trans = new Historiquetrans([
+                    $trans = new Historiquetrans([
                         'operation' => 'recharge_wallet',
                         'reference' => $dataPost['merchantReferenceId'],
                         'etat' => 'CONFIRMEE',
@@ -749,14 +902,10 @@ class PaymentController extends Controller
         }
 
         if($response1 != null){
-           if($dataPost['status'] == "SUCCESS"){
+            if($dataPost['status'] == "SUCCESS"){
                 $trans = Historiquetrans::where('reference', $dataPost['merchantReferenceId'])->where('etat', 'attend')->first();
                 if($trans){
                     $trans->update(['etat' => $trans->operation == 'recharge_visa_uba'? 'en_attente' : 'atraiter']);
-                    // Revente d'actions EMOTION : transfert des actions et paiement du vendeur
-                    if($trans->operation == 'achat_action_revente'){
-                        (new VenteActionController())->finaliserDepuisTransaction($trans->fresh());
-                    }
                     $order->update(['treatment' => 'ok']);
                 }
             }

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\AssistanceDataCredit;
 use App\Models\Client2;
 use App\Models\Customer;
 use App\Models\ConfigSim;
@@ -419,6 +420,21 @@ class UsersController
                         }
                     }
 
+                    try {
+                        $account = AssistanceDataCredit::where('customer_id', $customerVeri->id)->first();
+                        if ($account) {
+
+                        } else {
+                            $newWallet = new AssistanceDataCredit([
+                                'customer_id' => $customerVeri->id,
+                                'customer_phone' => $customerVeri->phoneclient,
+                                'solde' => 0
+                            ]);
+                            $newWallet->save();
+                            $account = $newWallet;
+                        } } catch (\Exception $th) {
+                    }
+
 
                     return response()->json([
                         'statut'=> true,
@@ -431,6 +447,7 @@ class UsersController
                         'message'=> $message,
                         'am'=> '*150*3*10*746*',
                         'moov'=> '*555*5*7*746*',
+                        'wallet' => $account,
                         'level' => $level
                     ]);
                 }else{
@@ -896,21 +913,15 @@ class UsersController
             $this->resetConfig($request->data, $customer->id);
             $customer->update(['config_sims' => json_encode($request->data)]);
             // Suivi crédit / forfait par SIM (table config_sims)
-            $simsErreur = null;
             try {
                 $sims = ConfigSim::synchroniser($customer->id, $request->data);
             } catch (\Throwable $th) {
-                // La config est enregistrée, mais pas les lignes SIM :
-                // on renvoie la cause pour pouvoir la corriger.
                 $sims = [];
-                $simsErreur = $th->getMessage();
-                \Illuminate\Support\Facades\Log::error('registerConfigSims config_sims : ' . $simsErreur);
             }
             return response()->json([
                 'statut'=> true,
                 'body'=> $customer,
-                'sims'=> $sims,
-                'sims_erreur'=> $simsErreur
+                'sims'=> $sims
             ]);
         }
         return response()->json([
