@@ -374,214 +374,211 @@ class PaymentController extends Controller
 
     public function newCallBackAMOfflineAppRequest(Request $request)
     {
-        try {
-            $getSummary = $this->summaryPushAM();
-            $data = $getSummary;
-            if ($data['status']['success'] == true) {
-                //return $data['data']['transactions'];
 
-                foreach ($data['data']['transactions'] as $item) {
+        $getSummary = $this->summaryPushAM();
+        $data = $getSummary;
+        if ($data['status']['success'] == true) {
+            //return $data['data']['transactions'];
 
-                    try {
-                        $airtelId = $item['transaction']['airtel_money_id'] ?? '';
-                        // 1. Filtrer uniquement ceux qui commencent par MP2
-                        //return $airtelId;
-                        if (str_starts_with($airtelId, 'MP2') && $item['transaction']['status'] == 'TS' && $item['transaction']['id'] == null) {
-                            // 2. Vérifier si l'ID existe déjà en base
-                            $alreadyExists = Historiquetrans::where('param6', $airtelId)->get();
-                            if (count($alreadyExists) == 0) {
+            foreach ($data['data']['transactions'] as $item) {
 
-                                $nowDate = date("Y-m-d", $item['transaction']['created_at']);
-                                $numclient = null;
-                                //$date = date("Y-m-d H:", strtotime("$nowDate - 1 hour"));
-                                $msisdn = (string) $item['payee']['msisdn'];
-                                $variantes = ConfigSim::variantesNumero($msisdn);
-                                $customer = Customer::whereIn('phoneclient', $variantes)
-                                    ->orWhereHas('sims', function ($q) use ($variantes) {
-                                        $q->whereIn('number', $variantes);
-                                    })
-                                    ->orWhere('payments', 'like', "%{$msisdn}%")
-                                    ->orWhere('config_sims', 'like', "%{$msisdn}%")
-                                    ->first();
-                                if ($customer) {
-                                    $newData = json_decode($customer->config_sims, true);
-                                    $slotRecherche = substr((string)intval($item['transaction']['amount']), -1);
-                                    $researchMontant = intval($item['transaction']['amount']) - intval($slotRecherche);
-                                    $frais = 0;
-                                    $operation = 'achat_credit';
-                                    $operateur = 'LIBERTIS';
-                                    $slot = 0;
-                                    $montant = intval($item['transaction']['amount']);
-                                    if (!in_array($slotRecherche, ['1', '2', '3', '4', '5', '6', '7', '8', '9'])) {
-                                        // Seule une opération créée AVANT ce paiement (30 min max)
-                                        // peut être payée par lui. Sinon, un ancien paiement du
-                                        // même montant resté sans opération passait à "atraiter"
-                                        // une nouvelle opération que le client n'avait pas payée.
-                                        $datePaiement = intval($item['transaction']['created_at']);
-                                        if ($datePaiement > 100000000000) {
-                                            $datePaiement = intval($datePaiement / 1000); // millisecondes
-                                        }
-                                        $trans = Historiquetrans::where('phonevendeur', $customer->phoneclient)
-                                            ->where('montant', intval($item['transaction']['amount']))
-                                            ->where('etat', 'attend')
-                                            ->where('created_at', '>=', date("Y-m-d H:i:s", $datePaiement - 30 * 60))
-                                            ->where('created_at', '<=', date("Y-m-d H:i:s", $datePaiement + 2 * 60))
-                                            ->orderBy('id', 'desc')
-                                            ->first();
-                                        if ($trans) {
-                                            $trans->update([
-                                                'param6' => $airtelId,
-                                                'etat' => $trans->operation == 'recharge_visa_uba' ? 'en_attente' : 'atraiter'
+                try {
+                    $airtelId = $item['transaction']['airtel_money_id'] ?? '';
+                    // 1. Filtrer uniquement ceux qui commencent par MP2
+                    //return $airtelId;
+                    if (str_starts_with($airtelId, 'MP2') && $item['transaction']['status'] == 'TS' && $item['transaction']['id'] == null) {
+                        // 2. Vérifier si l'ID existe déjà en base
+                        $alreadyExists = Historiquetrans::where('param6', $airtelId)->get();
+                        if (count($alreadyExists) == 0) {
 
-                                            ]);
-                                            $otherTrans = DetatilsOperation::where('transaction_id', $trans->id)->get();
-                                            if (count($otherTrans) > 0) {
-                                                foreach ($otherTrans as $otherTran) {
-                                                    DetatilsOperation::where('id', $otherTran->id)->update([
-                                                        'reference' => $airtelId
-                                                    ]);
-                                                }
-                                            }
-                                        }
-                                    } else if (in_array($slotRecherche, ['1', '2', '3', '4'])) {
-                                        // Achat hors connexion : temps d'appel (1, 2)
-                                        // ou forfait (3, 4) vers la SIM du slot 1 / 2
-                                        $this->achatHorsConnexion($customer, $item, $airtelId, intval($slotRecherche), $newData);
-                                    } else {
-                                        //définition de l'opérateur
-                                        if (intval($slotRecherche) % 2 != 0) {
-                                            $operateur = 'AIRTEL_GA';
-                                        }
-                                        //définition du slot
-                                        if (!in_array($slotRecherche, ['1', '2', '5', '6'])) {
-                                            $slot = 1;
-                                        }
-                                        //définition de l'opération et du montant des frais
-                                        if (intval($slotRecherche) > 4 && intval($slotRecherche) < 9) {
-                                            $operation = 'data_credit';
-                                        } else if (intval($slotRecherche) == 9) {
-                                            $operation = 'recharge_wallet';
-                                        } else {
-                                            if ($montant - intval($slotRecherche) == 120) {
-                                                $montant = $montant - 20;
-                                                $frais = 20;
-                                            } else {
-                                                $montant = $montant - 100;
-                                                $frais = 100;
-                                            }
-                                        }
-
-                                        // Numéro de la SIM du slot : table config_sims d'abord,
-                                        // sinon l'ancienne config (customer.config_sims). Avant :
-                                        // count(null) plantait (PHP 8) quand config_sims était vide.
-                                        $simSlot = $customer->sims->firstWhere('slot', intval($slot));
-                                        if ($simSlot) {
-                                            $numclient = strval($simSlot->number);
-                                        } else {
-                                            foreach ((is_array($newData) ? $newData : []) as $simConfig) {
-                                                if (strval($simConfig['slot'] ?? '') == strval($slot)) {
-                                                    $numclient = strval($simConfig['number'] ?? '');
-                                                }
-                                            }
-                                        }
-
-                                        $trans = new Historiquetrans([
+                            $nowDate = date("Y-m-d", $item['transaction']['created_at']);
+                            $numclient = null;
+                            //$date = date("Y-m-d H:", strtotime("$nowDate - 1 hour"));
+                            $msisdn = (string) $item['payee']['msisdn'];
+                            $variantes = ConfigSim::variantesNumero($msisdn);
+                            $customer = Customer::whereIn('phoneclient', $variantes)
+                                ->orWhereHas('sims', function ($q) use ($variantes) {
+                                    $q->whereIn('number', $variantes);
+                                })
+                                ->orWhere('payments', 'like', "%{$msisdn}%")
+                                ->orWhere('config_sims', 'like', "%{$msisdn}%")
+                                ->first();
+                            if ($customer) {
+                                $newData = json_decode($customer->config_sims, true);
+                                $slotRecherche = substr((string)intval($item['transaction']['amount']), -1);
+                                $researchMontant = intval($item['transaction']['amount']) - intval($slotRecherche);
+                                $frais = 0;
+                                $operation = 'achat_credit';
+                                $operateur = 'LIBERTIS';
+                                $slot = 0;
+                                $montant = intval($item['transaction']['amount']);
+                                if (!in_array($slotRecherche, ['1', '2', '3', '4', '5', '6', '7', '8', '9'])) {
+                                    // Seule une opération créée AVANT ce paiement (30 min max)
+                                    // peut être payée par lui. Sinon, un ancien paiement du
+                                    // même montant resté sans opération passait à "atraiter"
+                                    // une nouvelle opération que le client n'avait pas payée.
+                                    $datePaiement = intval($item['transaction']['created_at']);
+                                    if ($datePaiement > 100000000000) {
+                                        $datePaiement = intval($datePaiement / 1000); // millisecondes
+                                    }
+                                    $trans = Historiquetrans::where('phonevendeur', $customer->phoneclient)
+                                        ->where('montant', intval($item['transaction']['amount']))
+                                        ->where('etat', 'attend')
+                                        ->orderBy('id', 'desc')
+                                        ->first();
+                                    if ($trans) {
+                                        $trans->update([
                                             'param6' => $airtelId,
-                                            'operation' => $operation,
-                                            'reference' => $airtelId,
-                                            'etat' => 'atraiter',
-                                            'numclient' => $numclient,
-                                            'phonevendeur' => $customer->phoneclient,
-                                            'content' => $operateur,
-                                            'montant' => intval($item['transaction']['amount']),
-                                            'montant_sans_frais' => $montant,
-                                            'frais' => $frais,
-                                            'solde' => $customer->solde,
-                                            'origine_operation' => 'summary_offline',
-                                            'id_customer' => $customer->id
+                                            'etat' => $trans->operation == 'recharge_visa_uba' ? 'en_attente' : 'atraiter'
+
                                         ]);
-
-                                        $trans->save();
-                                        if($trans->id){
-                                            $account = AssistanceDataCredit::where('customer_id', $customer->id)->first();
-                                            if($account){
-                                                $newSolde = $account->solde + intval($trans->montant_sans_frais);
-                                                $account->update([
-                                                    'solde' => $newSolde,
-                                                    'depannage' => null
-                                                ]);
-
-                                                $trans->update([
-                                                    'solde' => $account->solde
+                                        $otherTrans = DetatilsOperation::where('transaction_id', $trans->id)->get();
+                                        if (count($otherTrans) > 0) {
+                                            foreach ($otherTrans as $otherTran) {
+                                                DetatilsOperation::where('id', $otherTran->id)->update([
+                                                    'reference' => $airtelId
                                                 ]);
                                             }
-                                            if ($operation == 'data_credit') {
-                                                $priceSearch = intval($item['transaction']['amount']) - intval($slotRecherche);
-                                                $forfait = ForfaitDataCredit::where('price', strval($priceSearch))->where('operateur', $operateur == 'AIRTEL_GA' ? 'airtel' : 'moov')->first();
-                                                if ($forfait) {
-                                                    $details_operation = [];
+                                        }
+                                    }
+                                } else if (in_array($slotRecherche, ['1', '2', '3', '4'])) {
+                                    // Achat hors connexion : temps d'appel (1, 2)
+                                    // ou forfait (3, 4) vers la SIM du slot 1 / 2
+                                    $this->achatHorsConnexion($customer, $item, $airtelId, intval($slotRecherche), $newData);
+                                } else {
+                                    //définition de l'opérateur
+                                    if (intval($slotRecherche) % 2 != 0) {
+                                        $operateur = 'AIRTEL_GA';
+                                    }
+                                    //définition du slot
+                                    if (!in_array($slotRecherche, ['1', '2', '5', '6'])) {
+                                        $slot = 1;
+                                    }
+                                    //définition de l'opération et du montant des frais
+                                    if (intval($slotRecherche) > 4 && intval($slotRecherche) < 9) {
+                                        $operation = 'data_credit';
+                                    } else if (intval($slotRecherche) == 9) {
+                                        $operation = 'recharge_wallet';
+                                    } else {
+                                        if ($montant - intval($slotRecherche) == 120) {
+                                            $montant = $montant - 20;
+                                            $frais = 20;
+                                        } else {
+                                            $montant = $montant - 100;
+                                            $frais = 100;
+                                        }
+                                    }
+
+                                    // Numéro de la SIM du slot : table config_sims d'abord,
+                                    // sinon l'ancienne config (customer.config_sims). Avant :
+                                    // count(null) plantait (PHP 8) quand config_sims était vide.
+                                    $simSlot = $customer->sims->firstWhere('slot', intval($slot));
+                                    if ($simSlot) {
+                                        $numclient = strval($simSlot->number);
+                                    } else {
+                                        foreach ((is_array($newData) ? $newData : []) as $simConfig) {
+                                            if (strval($simConfig['slot'] ?? '') == strval($slot)) {
+                                                $numclient = strval($simConfig['number'] ?? '');
+                                            }
+                                        }
+                                    }
+
+                                    $trans = new Historiquetrans([
+                                        'param6' => $airtelId,
+                                        'operation' => $operation,
+                                        'reference' => $airtelId,
+                                        'etat' => 'atraiter',
+                                        'numclient' => $numclient,
+                                        'phonevendeur' => $customer->phoneclient,
+                                        'content' => $operateur,
+                                        'montant' => intval($item['transaction']['amount']),
+                                        'montant_sans_frais' => $montant,
+                                        'frais' => $frais,
+                                        'solde' => $customer->solde,
+                                        'origine_operation' => 'summary_offline',
+                                        'id_customer' => $customer->id
+                                    ]);
+
+                                    $trans->save();
+                                    if($trans->id){
+                                        $account = AssistanceDataCredit::where('customer_id', $customer->id)->first();
+                                        if($account){
+                                            $newSolde = $account->solde + intval($trans->montant_sans_frais);
+                                            $account->update([
+                                                'solde' => $newSolde,
+                                                'depannage' => null
+                                            ]);
+
+                                            $trans->update([
+                                                'solde' => $account->solde
+                                            ]);
+                                        }
+                                        if ($operation == 'data_credit') {
+                                            $priceSearch = intval($item['transaction']['amount']) - intval($slotRecherche);
+                                            $forfait = ForfaitDataCredit::where('price', strval($priceSearch))->where('operateur', $operateur == 'AIRTEL_GA' ? 'airtel' : 'moov')->first();
+                                            if ($forfait) {
+                                                $details_operation = [];
+                                                array_push($details_operation, array(
+                                                    'operation' => 'achat_credit',
+                                                    'qte' => $forfait->qte_credit,
+                                                    'name' => 'achat_credit',
+                                                    'status' => 'wait',
+                                                    'validity' => null,
+                                                    'transaction_id' => $trans->id,
+                                                    'numclient' => $numclient,
+                                                    'operateur' => $operateur,
+                                                    'reference' => $airtelId,
+                                                ));
+
+                                                if ($forfait->qte_flex != null) {
                                                     array_push($details_operation, array(
-                                                        'operation' => 'achat_credit',
-                                                        'qte' => $forfait->qte_credit,
-                                                        'name' => 'achat_credit',
+                                                        'operation' => 'flex',
+                                                        'qte' => $forfait->qte_flex,
+                                                        'name' => 'flex',
                                                         'status' => 'wait',
-                                                        'validity' => null,
+                                                        'validity' => $forfait->validity_flex,
                                                         'transaction_id' => $trans->id,
                                                         'numclient' => $numclient,
                                                         'operateur' => $operateur,
                                                         'reference' => $airtelId,
                                                     ));
+                                                }
 
-                                                    if ($forfait->qte_flex != null) {
-                                                        array_push($details_operation, array(
-                                                            'operation' => 'flex',
-                                                            'qte' => $forfait->qte_flex,
-                                                            'name' => 'flex',
-                                                            'status' => 'wait',
-                                                            'validity' => $forfait->validity_flex,
-                                                            'transaction_id' => $trans->id,
-                                                            'numclient' => $numclient,
-                                                            'operateur' => $operateur,
-                                                            'reference' => $airtelId,
-                                                        ));
-                                                    }
+                                                if ($forfait->qte_min != null) {
+                                                    array_push($details_operation, array(
+                                                        'operation' => 'Appels',
+                                                        'qte' => $forfait->qte_min,
+                                                        'name' => 'Appels',
+                                                        'status' => 'wait',
+                                                        'validity' => $forfait->validity_min,
+                                                        'transaction_id' => $trans->id,
+                                                        'numclient' => $numclient,
+                                                        'operateur' => $operateur,
+                                                        'reference' => $airtelId,
+                                                    ));
+                                                }
 
-                                                    if ($forfait->qte_min != null) {
-                                                        array_push($details_operation, array(
-                                                            'operation' => 'Appels',
-                                                            'qte' => $forfait->qte_min,
-                                                            'name' => 'Appels',
-                                                            'status' => 'wait',
-                                                            'validity' => $forfait->validity_min,
-                                                            'transaction_id' => $trans->id,
-                                                            'numclient' => $numclient,
-                                                            'operateur' => $operateur,
-                                                            'reference' => $airtelId,
-                                                        ));
-                                                    }
+                                                if ($forfait->qte_mega != null) {
+                                                    array_push($details_operation, array(
+                                                        'operation' => 'achat_forfait',
+                                                        'qte' => $forfait->qte_mega,
+                                                        'name' => 'achat_forfait',
+                                                        'status' => 'wait',
+                                                        'validity' => $forfait->validity_mega,
+                                                        'transaction_id' => $trans->id,
+                                                        'numclient' => $numclient,
+                                                        'operateur' => $operateur,
+                                                        'reference' => $airtelId,
+                                                    ));
+                                                }
 
-                                                    if ($forfait->qte_mega != null) {
-                                                        array_push($details_operation, array(
-                                                            'operation' => 'achat_forfait',
-                                                            'qte' => $forfait->qte_mega,
-                                                            'name' => 'achat_forfait',
-                                                            'status' => 'wait',
-                                                            'validity' => $forfait->validity_mega,
-                                                            'transaction_id' => $trans->id,
-                                                            'numclient' => $numclient,
-                                                            'operateur' => $operateur,
-                                                            'reference' => $airtelId,
-                                                        ));
-                                                    }
+                                                if ($forfait->ticket_wifi != null) {
+                                                    // a constituer
+                                                }
 
-                                                    if ($forfait->ticket_wifi != null) {
-                                                        // a constituer
-                                                    }
-
-                                                    for ($i = 0; $i < count($details_operation); $i++) {
-                                                        $details = new DetatilsOperation($details_operation[$i]);
-                                                        $details->save();
-                                                    }
+                                                for ($i = 0; $i < count($details_operation); $i++) {
+                                                    $details = new DetatilsOperation($details_operation[$i]);
+                                                    $details->save();
                                                 }
                                             }
                                         }
@@ -589,23 +586,18 @@ class PaymentController extends Controller
                                 }
                             }
                         }
-                    } catch (\Exception $e) {
-                        return response()->json([
-                            'statut' => $e
-                        ]);
                     }
+                } catch (\Exception $e) {
+                    return response()->json([
+                        'statut' => $e
+                    ]);
                 }
             }
-            //$this->launchPause("https://gampay.org/gamclients/public/api/callBackAMOfflineAppRequest");
-            return response()->json([
-                'statut' => 'cest bon'
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'statut' => null,
-                'message'=> $e->getMessage()
-            ]);
         }
+        //$this->launchPause("https://gampay.org/gamclients/public/api/callBackAMOfflineAppRequest");
+        return response()->json([
+            'statut' => 'cest bon'
+        ]);
     }
 
     // Apis airtel money

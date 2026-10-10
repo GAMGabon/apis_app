@@ -36,7 +36,7 @@ class ConfigSim extends Model
         if ($n === '') {
             return [];
         }
-        return array_values(array_unique([$n, '0' . $n, ltrim($n, '0')]));
+        return array_values(array_unique([$numero, $n, '0' . $n, ltrim($n, '0')]));
     }
 
     /** Ligne SIM correspondant à un numéro (la plus récente). */

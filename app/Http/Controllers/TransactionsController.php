@@ -165,7 +165,7 @@ class TransactionsController
                     $verifMySoldeCustomer = 'ok';
                 }
             }else{
-                if($newSolde > 0){
+                if($newSolde >= 0){
                     $verifMySoldeCustomer = 'ok';
                 }
             }
